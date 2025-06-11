@@ -189,6 +189,9 @@ listTables <- function(con, schema = NULL) {
   if (methods::is(con, "duckdb_connection")) {
     sql <- glue::glue_sql("select table_name from information_schema.tables where table_schema = {schema[[1]]};", .con = con)
     out <- DBI::dbGetQuery(con, sql) %>% dplyr::pull(.data$table_name)
+    if (length(out) == 0 & attributes(attributes(con)$driver)$dbdir == ":memory:") {
+      out <- duckdb::duckdb_list_arrow(con)
+    }
     return(process_prefix(out))
   }
 

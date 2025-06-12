@@ -660,3 +660,34 @@ cdmCon <- function(cdm) {
   attr(attr(cdm, "cdm_source"), "dbcon")
 }
 
+#' Get CDM from Arrow datasets list
+#' 
+#' @param datasets A named list of Arrow datasets, with table names as keys
+#' 
+#' @return A list of dplyr database table references pointing to CDM tables
+#' @export
+#' 
+#' @examples
+#' \dontrun{
+#' example <- list(
+#'  "cdm_source" = arrow::open_dataset("path/to/folder/cdm_source"),
+#'  "person" = arrow::open_dataset("path/to/folder/person"),
+#'  ...
+#' )
+#' cdm <- CDMConnector::cdmFromDatasets(example)
+#' }
+cdmFromDatasets <- function(datasets) {
+  create_duckdb_connection <- function(ds) {
+    # create in-memory duckdb connection
+    con <- DBI::dbConnect(duckdb::duckdb())
+    # add arrow datasets to duckdb
+    purrr::iwalk(ds, \(x, idx) duckdb::duckdb_register_arrow(con, idx, x))
+    return(con)
+  }
+  # create cdm from in-memory duckdb connection
+  cdmFromCon(
+    con = create_duckdb_connection(datasets),
+    cdmSchema = "main",
+    writeSchema = "main"
+  )
+}

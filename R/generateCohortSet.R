@@ -1,4 +1,4 @@
-# Copyright 2024 DARWIN EU®
+# Copyright 2025 DARWIN EU®
 #
 # This file is part of CDMConnector
 #
@@ -19,14 +19,15 @@
 #' A "cohort set" is a collection of cohort definitions. In R this is stored in
 #' a dataframe with cohort_definition_id, cohort_name, and cohort columns.
 #' On disk this is stored as a folder with a CohortsToCreate.csv file and
-#' one or more json files.
+#' one or more json files, or as a single .json file.
 #' If the CohortsToCreate.csv file is missing then all of the json files in the
 #' folder will be used, cohort_definition_id will be automatically assigned
 #' in alphabetical order, and cohort_name will match the file names.
+#' You may also pass the path to a single .json file to read one cohort.
 #'
 #' @param path The path to a folder containing Circe cohort definition
-#' json files and optionally a csv file named CohortsToCreate.csv with columns
-#' cohortId, cohortName, and jsonPath.
+#' json files (and optionally a csv file named CohortsToCreate.csv with columns
+#' cohortId, cohortName, and jsonPath), or the path to a single .json file.
 #' @importFrom jsonlite read_json
 #' @importFrom dplyr tibble
 #' @export
@@ -35,28 +36,45 @@ readCohortSet <- function(path) {
   ensureInstalled("readr")
   ensureInstalled("jsonlite")
 
-  if (!dir.exists(path)) {
-    rlang::abort(glue::glue("The directory {path} does not exist!"))
+  if (!file.exists(path)) {
+    rlang::abort(glue::glue("Path does not exist: {path}"))
   }
 
-  if (!file.info(path)$isdir) {
-    rlang::abort(glue::glue("{path} is not a directory!"))
+  is_dir <- isTRUE(file.info(path)$isdir)
+  is_single_json <- !is_dir && grepl("\\.json$", path, ignore.case = TRUE)
+
+  if (!is_dir && !is_single_json) {
+    rlang::abort(glue::glue("Path must be a directory or a .json file: {path}"))
   }
 
-  if (file.exists(file.path(path, "CohortsToCreate.csv"))) {
+  if (is_single_json) {
+    json_files <- path
+    folder_path <- dirname(path)
+    has_csv <- FALSE
+  } else {
+    folder_path <- path
+    has_csv <- file.exists(file.path(path, "CohortsToCreate.csv"))
+  }
+
+  if (has_csv) {
     readr::local_edition(1)
-    cohortsToCreate <- readr::read_csv(file.path(path, "CohortsToCreate.csv"), show_col_types = FALSE) %>%
-      dplyr::mutate(jsonPath = file.path(path, .data$jsonPath)) %>%
+    cohortsToCreate <- readr::read_csv(file.path(folder_path, "CohortsToCreate.csv"), show_col_types = FALSE) %>%
+      dplyr::mutate(jsonPath = file.path(folder_path, .data$jsonPath)) %>%
       dplyr::mutate(cohort = purrr::map(.data$jsonPath, jsonlite::read_json)) %>%
       dplyr::mutate(json = purrr::map(.data$jsonPath, readr::read_file)) %>%
       dplyr::mutate(cohort_definition_id = .data$cohortId, cohort_name = .data$cohortName)
   } else {
-    jsonFiles <- sort(list.files(path, pattern = "\\.json$", full.names = TRUE))
+    if (!is_single_json) {
+      json_files <- sort(list.files(folder_path, pattern = "\\.json$", full.names = TRUE))
+    }
+    if (length(json_files) == 0L) {
+      rlang::abort(glue::glue("No .json files found in {folder_path}"))
+    }
 
     cohortsToCreate <- dplyr::tibble(
-      cohort_definition_id = seq_along(jsonFiles),
-      cohort_name = tools::file_path_sans_ext(basename(jsonFiles)),
-      json_path = jsonFiles) %>%
+      cohort_definition_id = seq_along(json_files),
+      cohort_name = tools::file_path_sans_ext(basename(json_files)),
+      json_path = json_files) %>%
       dplyr::mutate(cohort = purrr::map(.data$json_path, jsonlite::read_json)) %>%
       dplyr::mutate(json = purrr::map(.data$json_path, readr::read_file)) %>%
       dplyr::mutate(cohort_name = stringr::str_replace_all(tolower(.data$cohort_name), "\\s", "_")) %>%
@@ -66,16 +84,15 @@ readCohortSet <- function(path) {
       dplyr::mutate(cohort_definition_id = dplyr::if_else(stringr::str_detect(.data$cohort_name, "^[0-9]+$"), suppressWarnings(as.integer(.data$cohort_name)), .data$cohort_definition_id)) %>%
       dplyr::mutate(cohort_name = dplyr::if_else(stringr::str_detect(.data$cohort_name, "^[0-9]+$"), paste0("cohort_", .data$cohort_name), .data$cohort_name))
 
-      if (length(unique(cohortsToCreate$cohort_definition_id)) != nrow(cohortsToCreate) ||
-          length(unique(cohortsToCreate$cohort_name)) != nrow(cohortsToCreate)) {
+    if (length(unique(cohortsToCreate$cohort_definition_id)) != nrow(cohortsToCreate) ||
+        length(unique(cohortsToCreate$cohort_name)) != nrow(cohortsToCreate)) {
 
-        tryCatch(
-          cli::cli_abort("Problem creating cohort IDs and names from json file names. IDs and filenames must be unique!"),
-          finally = print(cohortsToCreate[,1:2])
-        )
-      }
-
+      tryCatch(
+        cli::cli_abort("Problem creating cohort IDs and names from json file names. IDs and filenames must be unique!"),
+        finally = print(cohortsToCreate[,1:2])
+      )
     }
+  }
 
   # snakecase name can be used for column names or filenames
   cohortsToCreate <- cohortsToCreate %>%
@@ -94,10 +111,170 @@ readCohortSet <- function(path) {
   return(cohortsToCreate)
 }
 
+extractCodesetIds <- function(x) {
+  if (is.list(x)) {
+    idNames <- c("CodesetId", "ConditionSourceConcept", "ProcedureSourceConcept",
+                 "DrugSourceConcept", "DeviceSourceConcept", "MeasurementSourceConcept",
+                 "ObservationSourceConcept", "VisitSourceConcept")
+    codes <- x[names(x) %in% idNames]
+    return(c(unlist(codes), unlist(purrr::map(x, extractCodesetIds))))
+  }
+  return(NULL)
+}
+
+createCodelistDataframe <- function(cohortSet) {
+  dfList <- list()
+  for (i in seq_along(cohortSet$cohort_definition_id)) {
+
+    df1 <- dplyr::tibble(
+      cohort_definition_id = as.integer(cohortSet$cohort_definition_id[[i]]),
+      codelist_id = purrr::map_int(cohortSet$cohort[[i]][["ConceptSets"]], "id"),
+      codelist_name = purrr::map_chr(cohortSet$cohort[[i]][["ConceptSets"]], "name")
+    )
+
+    if (nrow(df1) == 0) {
+      next
+    }
+
+    df2 <- dplyr::bind_rows(
+      dplyr::tibble(
+        codelist_id = unname(extractCodesetIds(cohortSet$cohort[[i]][["PrimaryCriteria"]])),
+        codelist_type = "index event"
+      ),
+      dplyr::tibble(
+        codelist_id = unname(extractCodesetIds(cohortSet$cohort[[i]][["InclusionRules"]])),
+        codelist_type = "inclusion criteria"
+      )
+    )
+
+    if (!("codelist_id" %in% names(df2))) {
+      # extractCodesetIds can return NULL
+      df2$codelist_id <- NA
+    }
+
+    df2 <- dplyr::filter(df2, !is.na(.data$codelist_id))
+
+    dfList[[i]] <- dplyr::inner_join(df1, df2, by = "codelist_id")
+  }
+
+  if (length(dfList) == 0) {
+    return(dplyr::tibble(
+      cohort_definition_id = integer(),
+      codelist_id = integer(),
+      codelist_name = character(),
+      codelist_type = character()
+    ))
+  } else {
+    return(dplyr::bind_rows(dfList))
+  }
+}
+
+
+extractConceptsFromConceptSetList <- function(conceptSets) {
+  results <- list()
+  for (entry in conceptSets) {
+    concept_set_id <- entry$id
+    if (!is.null(entry$expression$items)) {
+      for (item in entry$expression$items) {
+        concept_id <- item$concept$CONCEPT_ID
+        is_excluded <- ifelse(!is.null(item$isExcluded), item$isExcluded, FALSE)
+        include_descendants <- ifelse(!is.null(item$includeDescendants), item$includeDescendants, FALSE)
+
+        results <- append(results, list(dplyr::tibble(
+          codelist_id = concept_set_id,
+          concept_id = concept_id,
+          is_excluded = is_excluded,
+          include_descendants = include_descendants
+        )))
+      }
+    }
+  }
+
+  return(dplyr::bind_rows(results))
+}
+
+createAtlasCohortCodelistReference <- function(cdm, cohortSet) {
+  codelistDf <- createCodelistDataframe(cohortSet)
+
+  if (nrow(codelistDf) == 0) {
+    emptyCodelist <- dplyr::tibble(
+      cohort_definition_id = integer(),
+      codelist_name = character(),
+      codelist_type = character(),
+      concept_id = integer()
+    )
+    nm <- omopgenerics::uniqueTableName()
+    cdm <- omopgenerics::insertTable(cdm = cdm, name = paste0("codeset_", nm), table = emptyCodelist)
+    return(cdm[[paste0("codeset_", nm)]])
+  }
+
+  codes <- cohortSet %>%
+    dplyr::select("cohort_definition_id", "cohort") %>%
+    dplyr::mutate(df = purrr::map(.data$cohort, ~extractConceptsFromConceptSetList(.$ConceptSets))) %>%
+    dplyr::select(1, 3) %>%
+    tidyr::unnest(cols = 2)
+
+  concepts <- dplyr::left_join(codelistDf, codes, by = c("cohort_definition_id", "codelist_id"))
+
+  nm <- omopgenerics::uniqueTableName()
+  cdm <- omopgenerics::insertTable(cdm = cdm, name = nm, table = concepts)
+  on.exit(omopgenerics::dropSourceTable(cdm = cdm, name = nm), add = TRUE)
+
+  if (methods::is(cdmCon(cdm), "DatabaseConnectorJdbcConnection") && dbms(cdmCon(cdm)) == "sql server") {
+    # workaround for dbplyr translation of where clause on sql server when using DatabaseConnector
+    trueValueSql <- 1L
+    falseValueSql <- 0L
+  } else {
+    trueValueSql <- TRUE
+    falseValueSql <- FALSE
+  }
+
+  if (any(concepts$include_descendants)) {
+    cdm[[nm]] <- cdm[[nm]]  %>%
+      dplyr::filter(.data$include_descendants == .env$trueValueSql) %>%
+      dplyr::inner_join(
+        cdm$concept_ancestor, by = c("concept_id" = "ancestor_concept_id")
+      ) %>%
+      dplyr::select(
+        "cohort_definition_id", "codelist_id", "codelist_name", "codelist_type",
+        "concept_id" = "descendant_concept_id", "is_excluded"
+      ) %>%
+      dplyr::union_all(
+        cdm[[nm]] %>%
+          dplyr::select(
+            "cohort_definition_id", "codelist_id", "codelist_name",
+            "codelist_type", "concept_id", "is_excluded"
+          )
+      )
+  } else {
+    cdm[[nm]] <- cdm[[nm]] %>%
+      dplyr::select(!"include_descendants")
+  }
+
+  # Database
+  concepts <- cdm[[nm]] %>%
+    dplyr::distinct() %>%
+    # remove excluded concepts
+    dplyr::filter(.data$is_excluded == .env$falseValueSql) %>%
+    # Note that concepts that are not in the vocab will be silently ignored
+    dplyr::inner_join(dplyr::select(cdm$concept, "concept_id", "domain_id"), by = "concept_id") %>%
+    dplyr::select(
+      "cohort_definition_id",
+      "codelist_name",
+      "codelist_type",
+      "concept_id"
+    ) %>%
+    dplyr::distinct() %>%
+    dplyr::compute(name = paste0("codeset_", nm))
+
+  return(concepts)
+}
+
+
 #' Generate a cohort set on a cdm object
 #'
 #' @description
-#' A "chort_table" object consists of four components
+#' A "cohort_table" object consists of four components
 #' \itemize{
 #'   \item{A remote table reference to an OHDSI cohort table with at least
 #'         the columns: cohort_definition_id, subject_id, cohort_start_date,
@@ -113,16 +290,6 @@ readCohortSet <- function(path) {
 #'   \item{A **cohortCounts attribute** which points to a remote table
 #'         containing cohort counts}
 #' }
-#'
-#' Each of the three attributes are tidy tables. The implementation of this
-#' object is experimental and user feedback is welcome.
-#'
-#' `r lifecycle::badge("experimental")`
-
-#' One key design principle is that cohort_table objects are created once
-#' and can persist across analysis execution but should not be modified after
-#' creation. While it is possible to modify a cohort_table object doing
-#' so will invalidate it and it's attributes may no longer be accurate.
 #'
 #' @param cdm A cdm reference created by CDMConnector. write_schema must be
 #'   specified.
@@ -171,7 +338,20 @@ generateCohortSet <- function(cdm,
   withr::local_options(list("cli.progress_show_after" = 0, "cli.progress_clear" = FALSE))
   checkmate::assertClass(cdm, "cdm_reference")
   con <- cdmCon(cdm)
+
+  if (is.null(con)) {
+    # local cdm
+    return(generateCohortSetLocal(
+      cdm = cdm,
+      cohortSet = cohortSet,
+      name = name,
+      computeAttrition = computeAttrition,
+      overwrite = overwrite
+    ))
+  }
+
   checkmate::assertTRUE(DBI::dbIsValid(con))
+
   checkmate::assertCharacter(name, len = 1, min.chars = 1, any.missing = FALSE)
   if (name != tolower(name)) {
     rlang::abort("Cohort table name {name} must be lowercase!")
@@ -303,43 +483,10 @@ generateCohortSet <- function(cdm,
       )
 
     if (dbms(con) == "snowflake") {
-      # we don't want to use temp emulation on snowflake. We want to use actual temp tables.
-      sql <- stringr::str_replace_all(sql, "CREATE TABLE #", "CREATE TEMPORARY TABLE ") %>%
-        stringr::str_replace_all("create table #", "create temporary table ") %>%
-        stringr::str_replace_all("#", "")
-
-      # temp tables created by circe that can be left dangling.
-      tempTablesToDrop <- c(
-        "Codesets",
-        "qualified_events",
-        "cohort_rows",
-        "Inclusion",
-        "strategy_ends",
-        "inclusion_events",
-        "included_events",
-        "final_cohort",
-        "inclusion_rules",
-        "BEST_EVENTS",
-        paste0("Inclusion_", 0:9))
-
-      for (j in seq_along(tempTablesToDrop)) {
-        suppressMessages({
-          invisible(DBI::dbExecute(con, paste("drop table if exists", tempTablesToDrop[j])))
-        })
-      }
-
-      namesToQuote <- c("cohort_definition_id",
-                        "subject_id",
-                        "cohort_start_date",
-                        "cohort_end_date",
-                        "mode_id",
-                        "inclusion_rule_mask",
-                        "person_count",
-                        "rule_sequence",
-                        "gain_count",
-                        "person_total",
-                        "base_count", "final_count")
-
+      # Quote column names that Snowflake may otherwise treat inconsistently.
+      namesToQuote <- c("cohort_definition_id", "subject_id", "cohort_start_date", "cohort_end_date",
+                        "mode_id", "inclusion_rule_mask", "person_count", "rule_sequence",
+                        "gain_count", "person_total", "base_count", "final_count")
       for (n in namesToQuote) {
         sql <- stringr::str_replace_all(sql, n, DBI::dbQuoteIdentifier(con, n))
       }
@@ -358,29 +505,19 @@ generateCohortSet <- function(cdm,
     # --([^\n])*?\n => match strings starting with -- followed by anything except a newline
     sql <- stringr::str_replace_all(sql, "--([^\n])*?\n", "\n")
 
-    if (dbms(con) != "spark" && dbms(con) != "bigquery") {
+    if (dbms(con) %in% c("spark", "bigquery", "snowflake")) {
+      # Use temp emulation: Spark/BigQuery have no temp tables; Snowflake uses it so # is not stripped.
+      sql <- SqlRender::translate(sql,
+                                  targetDialect = CDMConnector::dbms(con),
+                                  tempEmulationSchema = write_schema_sql)
+    } else {
       sql <- SqlRender::translate(sql,
                                   targetDialect = CDMConnector::dbms(con),
                                   tempEmulationSchema = "SQL ERROR")
-
       if (stringr::str_detect(sql, "SQL ERROR")) {
         cli::cli_abort("sqlRenderTempEmulationSchema being used for cohort generation!
         Please open a github issue at {.url https://github.com/darwin-eu/CDMConnector/issues} with your cohort definition.")
       }
-    } else {
-      # we need temp emulation on spark as there are no temp tables
-
-      if ("schema" %in% names(write_schema)) {
-        s <- unname(write_schema["schema"])
-      } else if (length(write_schema) == 1) {
-        s <- unname(write_schema)
-      } else {
-        s <- unname(write_schema[2])
-      }
-
-      sql <- SqlRender::translate(sql,
-                                  targetDialect = CDMConnector::dbms(con),
-                                  tempEmulationSchema = s)
     }
 
     if (dbms(con) == "duckdb") {
@@ -392,6 +529,7 @@ generateCohortSet <- function(cdm,
       # issue with date add translation on spark
       sql <- stringr::str_replace_all(sql, "date_add", "dateadd")
       sql <- stringr::str_replace_all(sql, "DATE_ADD", "DATEADD")
+      sql <- stringr::str_replace_all(sql, "TRUNCATE TABLE", "DELETE FROM")
     }
 
     sql <- stringr::str_replace_all(sql, "\\s+", " ")
@@ -400,6 +538,24 @@ generateCohortSet <- function(cdm,
       stringr::str_trim() %>%
       stringr::str_c(";") %>% # remove empty statements
       stringr::str_subset("^;$", negate = TRUE)
+
+    # Snowflake: drop all SqlRender temp-emulation tables before running any cohort SQL.
+    if (dbms(con) == "snowflake") {
+      snowflakeTempNames <- c(
+        "Codesets", "qualified_events", "cohort_rows", "Inclusion", "strategy_ends",
+        "inclusion_events", "included_events", "final_cohort", "inclusion_rules", "BEST_EVENTS",
+        paste0("Inclusion_", 0:9))
+      # Prefix is in the same translated SQL (e.g. "xyz123qualified_events"); extract from full text.
+      sql_one <- paste(sql, collapse = " ")
+      m <- regexpr("[a-zA-Z0-9]+qualified_events", sql_one)
+      prefix <- if (m[[1]] > 0) sub("qualified_events.*", "", regmatches(sql_one, m)[[1]]) else ""
+      if (nzchar(prefix)) {
+        for (nm in snowflakeTempNames) {
+          full <- paste0(write_schema_sql, ".", DBI::dbQuoteIdentifier(con, paste0(prefix, nm)))
+          suppressMessages(invisible(DBI::dbExecute(con, paste("DROP TABLE IF EXISTS", full))))
+        }
+      }
+    }
 
     # drop temp tables if they already exist
     drop_statements <- c(
@@ -452,7 +608,7 @@ generateCohortSet <- function(cdm,
       cohortStem = name,
       cohortSet = cohortSet,
       overwrite = overwrite
-    ) |>
+    ) %>%
       dplyr::collect()
   } else {
     cohort_attrition_ref <- NULL
@@ -463,7 +619,7 @@ generateCohortSet <- function(cdm,
   #   DBI::dbRemoveTable(con, inSchema(write_schema, paste0(name, "_set"), dbms = dbms(con)))
   # }
 
-  cdm[[name]] <- cohort_ref |>
+  cdm[[name]] <- cohort_ref %>%
     omopgenerics::newCdmTable(src = attr(cdm, "cdm_source"), name = name)
 
   # Create the object. Let the constructor handle getting the counts.----
@@ -472,10 +628,12 @@ generateCohortSet <- function(cdm,
     cohort_definition_id = as.integer(.data$cohort_definition_id),
     cohort_name = as.character(.data$cohort_name))
 
+  cohortCodelistRef <- createAtlasCohortCodelistReference(cdm, cohortSet)
   cdm[[name]] <- omopgenerics::newCohortTable(
     table = cdm[[name]],
     cohortSetRef = cohortSetRef,
-    cohortAttritionRef = cohort_attrition_ref)
+    cohortAttritionRef = cohort_attrition_ref,
+    cohortCodelistRef = cohortCodelistRef)
 
   cli::cli_progress_done()
 
@@ -644,7 +802,8 @@ computeAttritionTable <- function(cdm,
   finalCounts <- dplyr::tbl(con, .inSchema(schema, cohortStem, dbms(con))) %>%
     dplyr::group_by(.data$cohort_definition_id) %>%
     dplyr::summarise(n_records = dplyr::n(), n_subjects = dplyr::n_distinct(.data$subject_id)) %>%
-    dplyr::collect()
+    dplyr::collect() %>%
+    dplyr::mutate_all(as.integer)
 
   lastAttritionRow <- dplyr::slice_max(attrition, n = 1, order_by = .data$reason_id, by = "cohort_definition_id")
 
@@ -673,6 +832,102 @@ computeAttritionTable <- function(cdm,
 
   dplyr::tbl(con, .inSchema(schema, paste0(cohortStem, "_attrition"), dbms(con))) %>%
     dplyr::rename_all(tolower)
+}
+
+#' Generate a cohort set on a local CDM (list of dataframes)
+#'
+#' Copies the local CDM to an in-memory DuckDB database, runs
+#' \code{\link{generateCohortSet}}, then collects the generated cohort table
+#' and its attributes back into R and adds them to the input CDM.
+#'
+#' @param cdm A local cdm object (list of dataframes, e.g. from
+#'   \code{dplyr::collect(cdm)}).
+#' @param cohortSet A cohort set from \code{\link{readCohortSet}}.
+#' @param name Name of the cohort table to create.
+#' @param computeAttrition Whether to compute attrition.
+#' @param overwrite Whether to overwrite an existing cohort table.
+#' @return The input \code{cdm} with the new cohort table added (as local
+#'   dataframes).
+#' @keywords internal
+#' @noRd
+generateCohortSetLocal <- function(cdm,
+                                  cohortSet,
+                                  name,
+                                  computeAttrition = TRUE,
+                                  overwrite = TRUE) {
+  rlang::check_installed("duckdb")
+  checkmate::assert_class(cdm, "cdm_reference")
+  checkmate::assert_list(cdm, names = "named")
+  checkmate::assert_character(name, len = 1L, min.chars = 1L)
+
+  # Create in-memory DuckDB and copy CDM tables (skip existing cohort tables)
+  con <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  write_schema <- c(schema = "main")
+  for (nm in names(cdm)) {
+    if (inherits(cdm[[nm]], "cohort_table")) {
+      next
+    }
+    tbl <- cdm[[nm]]
+    full_name <- .inSchema(schema = write_schema, table = nm, dbms = "duckdb")
+    DBI::dbWriteTable(con, name = full_name, value = dplyr::as_tibble(tbl), overwrite = TRUE)
+  }
+
+  cdm_name <- omopgenerics::cdmName(cdm)
+  cdm_db <- cdmFromCon(
+    con = con,
+    cdmSchema = "main",
+    writeSchema = "main",
+    cdmName = cdm_name
+  )
+
+  cdm_db <- generateCohortSet(
+    cdm = cdm_db,
+    cohortSet = cohortSet,
+    name = name,
+    computeAttrition = computeAttrition,
+    overwrite = overwrite
+  )
+
+  # Collect cohort table and attributes back to R
+  cohort_df <- dplyr::collect(cdm_db[[name]]) %>%
+    dplyr::rename_all(tolower) %>%
+    dplyr::mutate(
+      cohort_definition_id = as.integer(.data$cohort_definition_id),
+      subject_id = as.integer(.data$subject_id),
+      cohort_start_date = as.Date(.data$cohort_start_date),
+      cohort_end_date = as.Date(.data$cohort_end_date)
+    )
+
+  cohort_set_df <- omopgenerics::settings(cdm_db[[name]])
+  cohort_attrition_df <- omopgenerics::attrition(cdm_db[[name]])
+  cohort_codelist_ref <- attr(cdm_db[[name]], "cohort_codelist")
+  cohort_codelist_df <- NULL
+  if (!is.null(cohort_codelist_ref)) {
+    if (inherits(cohort_codelist_ref, "tbl_lazy")) {
+      cohort_codelist_df <- dplyr::collect(cohort_codelist_ref) %>% dplyr::rename_all(tolower)
+    } else if (is.data.frame(cohort_codelist_ref)) {
+      cohort_codelist_df <- cohort_codelist_ref
+    }
+  }
+
+  # Wrap cohort dataframe as cdm_table and add to cdm before newCohortTable
+  # (validation requires cohort to be part of cdm_reference)
+  cohort_tbl <- omopgenerics::newCdmTable(
+    table = cohort_df,
+    src = attr(cdm, "cdm_source"),
+    name = name
+  )
+  cdm[[name]] <- cohort_tbl
+  cdm[[name]] <- omopgenerics::newCohortTable(
+    table = cdm[[name]],
+    cohortSetRef = cohort_set_df,
+    cohortAttritionRef = cohort_attrition_df,
+    cohortCodelistRef = cohort_codelist_df
+  )
+
+  cdm
 }
 
 getInclusionMaskId <- function(numberInclusion) {

@@ -123,7 +123,7 @@ for (dbtype in dbToTest) {
 # )))
 
 test_that('dateadd works without pipe', {
-  skip("failing test")
+  skip("dateadd requires magrittr pipe (%>%); direct mutate() and native pipe (|>) not supported")
   con <- DBI::dbConnect(duckdb::duckdb())
   DBI::dbWriteTable(con, "tbl", data.frame(date = as.Date("2020-01-01")))
 
@@ -190,12 +190,16 @@ test_clock_functions <- function(con, write_schema) {
   # add_years and add_days return datetimes on postgres making the as.Date() conversion is needed
   # date_build does not work on redshift or duckdb https://github.com/tidyverse/dbplyr/pull/1513
 
-  library(clock)
+  suppressWarnings(library(clock))
   # on postgres we need the as.Date conversion around add_years and add_days
   df <- date_tbl %>%
     dplyr::mutate(y2 = clock::get_year(date1),
                   m2 = clock::get_month(date1),
                   d2 = clock::get_day(date1))
+
+  # date_df |>
+  #   mutate(dif_time = difftime(date2, date1))
+  # in difftime the later date comes first
 
   if (dbms(con) != "duckdb") {
     df <- dplyr::mutate(df,
@@ -227,7 +231,7 @@ test_clock_functions <- function(con, write_schema) {
   expect_equal(unique(df$m2), 12)
   expect_equal(unique(df$d2), 1)
 
-  if (dbms(con) %in% c("redshift", "postgres")) {
+  if (dbms(con) %in% c("redshift", "postgresql", "sql server", "spark", "snowflake")) {
     df$dif_days <- abs(df$dif_days) # TODO on some dbms the translation of difftime does not match base R difftime and we get the wrong sign
   }
 
@@ -252,6 +256,7 @@ test_clock_functions <- function(con, write_schema) {
 # dbtype = "postgres"
 # dbtype = "duckdb"
 # dbtype = "redshift"
+# dbtype = "sqlserver"
 for (dbtype in dbToTest) {
   test_that(glue::glue("{dbtype} - date functions"), {
     if (!(dbtype %in% ciTestDbs)) skip_on_ci()
@@ -317,9 +322,27 @@ for (dbtype in dbToTest) {
   })
 }
 
+test_that("date functions work with local cdms", {
 
+  skip_on_cran()
+  skip_on_ci()
+  skip_if_not_installed("duckdb")
+  library(dplyr)
 
+  con <- local_eunomia_con()
+  cdm <- cdmFromCon(con, "main", "main")
 
+  cdm <- dplyr::collect(cdm)
 
+  df <- cdm$visit_occurrence |>
+    select(visit_start_date) %>%
+    mutate(new_date = !!dateadd("visit_start_date", 1, "year")) %>%
+    mutate(datediff = !!datediff("visit_start_date", "new_date", interval = "year")) %>%
+    mutate(m = !!datepart("new_date", "month"),
+           d = !!datepart("new_date", "day"),
+           y = !!datepart("new_date", "year")) |>
+    mutate(txt = paste(y,m,d, sep = "/")) %>%
+    mutate(reconstructed = !!asDate(txt))
 
-
+  expect_s3_class(df, "data.frame")
+})

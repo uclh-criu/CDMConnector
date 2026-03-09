@@ -21,6 +21,12 @@ test_cohort_generation <- function(con, cdm_schema, write_schema) {
 
   expect_true(methods::is(cdm$chrt0, "cohort_table"))
 
+  cohortCodelist <- dplyr::collect(attr(cdm$chrt0, "cohort_codelist"))
+  expect_true(is.data.frame(cohortCodelist))
+  expect_equal(colnames(cohortCodelist), c("cohort_definition_id", "codelist_name", "concept_id", "codelist_type"))
+
+  expect_true(nrow(cohortCount(cdm$chrt0)) == 3)
+
   expect_error(generateCohortSet(cdm, name = "blah", cohortSet = "not a cohort"))
 
   # check already exists
@@ -58,7 +64,7 @@ test_cohort_generation <- function(con, cdm_schema, write_schema) {
 }
 
 for (dbtype in dbToTest) {
-  # dbtype = "bigquery"
+  # dbtype = "duckdb"
   test_that(glue::glue("{dbtype} - generateCohortSet"), {
     skip_if_not_installed("CirceR")
     if (dbtype != "duckdb") skip_on_cran() else skip_if_not_installed("duckdb")
@@ -113,7 +119,7 @@ test_that("duckdb - phenotype library generation", {
     dplyr::pull("cohortId") %>%
     PhenotypeLibrary::getPlCohortDefinitionSet()
 
-  con <- DBI::dbConnect(duckdb::duckdb(eunomiaDir()))
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(
     con = con, cdmName = "eunomia", cdmSchema = "main", writeSchema = "main"
   )
@@ -121,7 +127,6 @@ test_that("duckdb - phenotype library generation", {
     generateCohortSet(cdm, cohortSet, name = "cohort", overwrite = TRUE, computeAttrition = TRUE),
     NA
   )
-  DBI::dbDisconnect(con, shutdown = T)
 })
 
 test_that("TreatmentPatterns cohort works", {
@@ -129,7 +134,7 @@ test_that("TreatmentPatterns cohort works", {
   skip_on_cran()
   skip("manual test")
   skip("failing test")
-  con <- DBI::dbConnect(duckdb::duckdb(eunomiaDir()))
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(
     con = con, cdmName = "eunomia", cdmSchema = "main", writeSchema = "main"
   )
@@ -146,7 +151,6 @@ test_that("TreatmentPatterns cohort works", {
   )
 
   expect_s3_class(cdm$cohorttable, "cohort_table")
-  DBI::dbDisconnect(con, shutdown = TRUE)
 })
 
 # Test from issue https://github.com/darwin-eu-dev/CDMConnector/issues/238
@@ -173,10 +177,10 @@ test_that("TreatmentPatterns cohort works", {
 # cohort_count(cdm$gibleed)
 
 
-test_that("newGeneratedCohortSet works with prefix", {
+test_that("newCohortTable works with prefix", {
   skip_if_not_installed("duckdb")
   skip_if_not("duckdb" %in% dbToTest)
-  con <- DBI::dbConnect(duckdb::duckdb(eunomiaDir()))
+  con <- local_eunomia_con()
 
   write_schema <- c(schema = "main", prefix = "test_")
   cdm <- cdmFromCon(con, "main", writeSchema = write_schema, cdmName = "eunomia")
@@ -201,8 +205,6 @@ test_that("newGeneratedCohortSet works with prefix", {
   expect_s3_class(settings(cdm$cohort), "data.frame")
 
   expect_s3_class(attrition(cdm$cohort), "data.frame")
-
-  DBI::dbDisconnect(con, shutdown = TRUE)
 })
 
 # issue: https://github.com/darwin-eu-dev/CDMConnector/issues/337
@@ -210,11 +212,12 @@ test_that("newGeneratedCohortSet works with prefix", {
 test_that("no error is given if attrition table already exists and overwrite = TRUE", {
   skip_if_not_installed("CirceR")
   skip_if_not_installed("duckdb")
-  con <- DBI::dbConnect(duckdb::duckdb(eunomiaDir()))
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(
     con = con, cdmName = "eunomia", cdmSchema = "main", writeSchema = "main"
   )
   cohortSet <- readCohortSet(system.file("cohorts1", package = "CDMConnector"))
+  cohortSet2 <- readCohortSet(system.file("cohorts2", package = "CDMConnector"))
 
   cdm <- generateCohortSet(cdm,
                            cohortSet,
@@ -223,21 +226,24 @@ test_that("no error is given if attrition table already exists and overwrite = T
 
   expect_no_error({
     cdm <- generateCohortSet(cdm,
-                             cohortSet,
+                             cohortSet2[3,],
                              name = "test",
                              computeAttrition = FALSE,
                              overwrite = TRUE)
   })
 
+  # attrition(cdm$test) # we still get the attrition table but it only has one row with the final count
+  # settings(cdm$test)
+
   expect_no_error({
     cdm <- generateCohortSet(cdm,
-                             cohortSet,
+                             cohortSet2[3,],
                              name = "test",
                              computeAttrition = TRUE,
                              overwrite = TRUE)
   })
 
-  DBI::dbDisconnect(con, shutdown = TRUE)
+  # attrition(cdm$test)
 })
 
 test_that("readCohortSet works from working directory", {
@@ -266,13 +272,12 @@ test_that("invalid cohort table names give an error", {
   skip_if_not_installed("CirceR")
   skip_if_not_installed("duckdb")
   skip_if_not("duckdb" %in% dbToTest)
-  con <- DBI::dbConnect(duckdb::duckdb(), eunomiaDir())
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(con, "main", "main")
   cohortSet <- readCohortSet(system.file("cohorts1", package = "CDMConnector", mustWork = TRUE))
   expect_error(cdm <- generateCohortSet(cdm, cohortSet, name = "4test", overwrite = TRUE))
   expect_error(cdm <- generateCohortSet(cdm, cohortSet, name = "Test", overwrite = TRUE))
   expect_error(cdm <- generateCohortSet(cdm, cohortSet, name = "te$t", overwrite = TRUE))
-  cdmDisconnect(cdm)
 })
 
 
@@ -284,7 +289,7 @@ test_that("non-utf8 characters in json files should be handled by readCohortSet 
 test_that("cohort era collapse is recorded in attrition", {
   skip_if_not_installed("CirceR")
   skip_if_not_installed("duckdb")
-  con <- DBI::dbConnect(duckdb::duckdb(), eunomiaDir())
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(con, "main", "main")
 
   # this cohort has a lot of records per person with a large era gap parameter
@@ -306,7 +311,8 @@ test_that("cohort era collapse is recorded in attrition", {
   expect_equal(actualCohortCount, expectedCohortCount)
 
   expect_true("Cohort records collapsed" %in% attrition(cdm$cohort)$reason)
-
-  cdmDisconnect(cdm)
 })
+
+
+
 

@@ -85,7 +85,7 @@ test_that("getFullTableNameQuoted", {
   skip_if_not_installed("duckdb")
   skip_if_not(eunomiaIsAvailable())
 
-  con <- DBI::dbConnect(duckdb::duckdb(eunomiaDir()))
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(
     con = con, cdmName = "eunomia", cdmSchema = "main", writeSchema = "main"
   )
@@ -103,20 +103,16 @@ test_that("getFullTableNameQuoted", {
   expect_error(getFullTableNameQuoted(x = NULL, name = "myTable", schema = c("mySchema", "dbo")))
   expect_error(getFullTableNameQuoted(x = cdm$person, name = NULL, schema = c("mySchema", "dbo")))
   expect_error(getFullTableNameQuoted(x = cdm$person, name = "myTable", schema = -1))
-
-  DBI::dbDisconnect(con, shutdown = TRUE)
 })
 
 test_that(".dbIsValid", {
   skip_if_not_installed("duckdb")
   skip_if_not(eunomiaIsAvailable())
 
-  con <- DBI::dbConnect(duckdb::duckdb(eunomiaDir()))
+  con <- local_eunomia_con()
 
   result <- .dbIsValid(con)
   expect_true(result)
-
-  DBI::dbDisconnect(con, shutdown = TRUE)
 })
 
 test_that("inSchema", {
@@ -246,6 +242,25 @@ for (dbtype in dbToTest) {
 
     expect_false(tableName %in% listTables(con, write_schema))
 
+    disconnect(con)
+  })
+}
+
+for (dbtype in dbToTest) {
+  test_that(glue::glue("{dbtype} - computeDataHashByTable"), {
+    if (!(dbtype %in% ciTestDbs)) skip_on_ci()
+    if (dbtype != "duckdb") skip_on_cran() else skip_if_not_installed("duckdb")
+    con <- get_connection(dbtype)
+    cdm_schema <- get_cdm_schema(dbtype)
+
+    write_schema <- get_write_schema(dbtype, prefix = paste0("tmp", as.integer(Sys.time()), "_"))
+    skip_if(any(write_schema == "") || any(cdm_schema == "") || is.null(con))
+    cdm <- cdmFromCon(con, cdm_schema, write_schema)
+    suppressMessages({
+      cdmTableHashes <- computeDataHashByTable(cdm)
+    })
+    expect_s3_class(cdmTableHashes, "data.frame")
+    expect_true(nrow(cdmTableHashes) > 1)
     disconnect(con)
   })
 }

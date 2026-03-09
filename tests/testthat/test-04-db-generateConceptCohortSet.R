@@ -24,6 +24,21 @@ test_generate_concept_cohort_set <- function(con, cdm_schema, write_schema) {
     overwrite = TRUE
   )
 
+  # check that date types are correct
+  cdm$gibleed |>
+    head() |>
+    dplyr::collect() |>
+    dplyr::select(3:4) |>
+    purrr::map_chr(class) |>
+    unname() |>
+    expect_equal(c("Date", "Date"))
+
+  # check attrition columns
+  expect_setequal(
+    colnames(attrition(cdm$gibleed)),
+    omopgenerics::cohortColumns(table = "cohort_attrition")
+  )
+
   cohort <- readCohortSet(system.file("cohorts3", package = "CDMConnector")) %>%
     dplyr::filter(cohort_name %in% c("gibleed_default", "GiBleed_default")) %>%
     dplyr::mutate(cohort_definition_id = 1L)
@@ -384,7 +399,7 @@ test_that("missing domains produce warning", {
   skip_on_cran()
   skip_if_not_installed("duckdb")
   skip_if_not("duckdb" %in% dbToTest)
-  con <- DBI::dbConnect(duckdb::duckdb(eunomiaDir()))
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(
     con = con, cdmName = "eunomia", cdmSchema = "main", writeSchema = "main"
   ) %>%
@@ -394,15 +409,13 @@ test_that("missing domains produce warning", {
     cdm <- generateConceptCohortSet(cdm, name = "celecoxib",
                                     conceptSet = list(celecoxib = 1118084))
   })
-
-  DBI::dbDisconnect(con, shutdown = TRUE)
 })
 
 test_that("Regimen domain does not cause error", {
   skip_on_cran()
   skip_if_not("duckdb" %in% dbToTest)
   skip_if_not_installed("duckdb")
-  con <- DBI::dbConnect(duckdb::duckdb(eunomiaDir()))
+  con <- local_eunomia_con()
 
   # create a fake concept with domain "Regimen"
   DBI::dbExecute(con, "UPDATE main.concept SET domain_id = 'Regimen' WHERE concept_id = 19129655")
@@ -420,8 +433,6 @@ test_that("Regimen domain does not cause error", {
   })
 
   expect_s3_class(cdm$cohort, "cohort_table")
-
-  DBI::dbDisconnect(con, shutdown = TRUE)
 })
 
 test_that("Eunomia", {
@@ -431,7 +442,7 @@ test_that("Eunomia", {
   skip_if_not(eunomiaIsAvailable())
 
   # edge case with overlaps (issue 420)
-  db <- DBI::dbConnect(duckdb::duckdb(), eunomiaDir())
+  db <- local_eunomia_con()
   cdm <- cdmFromCon(
     con = db,
     cdmSchema = "main",
@@ -493,6 +504,7 @@ test_that("Eunomia", {
 })
 
 test_that("invalid cdm records are ignored in generateConceptCohortSet", {
+  skip_on_cran()
   skip_if_not_installed("duckdb")
   cdm <- cdmFromTables(
     tables = list(
@@ -553,8 +565,9 @@ test_that("invalid cdm records are ignored in generateConceptCohortSet", {
 
 
 test_that("attrition columns are correct", {
+  skip_on_cran()
   skip_if_not("duckdb" %in% dbToTest)
-  con <- DBI::dbConnect(duckdb::duckdb(), eunomiaDir())
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(con, "main", "main")
 
   cdm <- generateConceptCohortSet(cdm,
@@ -573,8 +586,6 @@ test_that("attrition columns are correct", {
 
   expect_equal(expected_colnames, colnames(attrition(cdm$cohort1)))
   expect_equal(expected_colnames, colnames(attrition(cdm$cohort2)))
-
-  DBI::dbDisconnect(con, shutdown = T)
 })
 
 
@@ -582,7 +593,7 @@ test_that("attrition columns are correct", {
   skip_if_not_installed("Capr")
   skip_if_not("duckdb" %in% dbToTest)
   skip_on_cran()
-  con <- DBI::dbConnect(duckdb::duckdb(), eunomiaDir())
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(con, "main", "main")
 
   cohort_set <- readCohortSet(system.file("cohorts1", package = "CDMConnector"))
@@ -595,7 +606,53 @@ test_that("attrition columns are correct", {
                          "reason_id", "reason", "excluded_records", "excluded_subjects")
 
   expect_equal(expected_colnames, colnames(attrition(cdm$cohort)))
+})
 
-  DBI::dbDisconnect(con, shutdown = T)
+
+test_that("generateConceptCohortSet works on local CDMs", {
+
+  skip_if_not_installed("duckdb")
+  skip_on_ci()
+  skip_on_cran()
+
+  con <- local_eunomia_con()
+  cdm <- cdmFromCon(con = con, cdmSchema = "main", writeSchema = "main")
+
+  # this works
+  cdm <- generateConceptCohortSet(cdm = cdm, conceptSet = list(my_concept = 4112343L), name = "my_cohort")
+
+  cols <- c("cohort_definition_id","subject_id","cohort_start_date","cohort_end_date")
+
+  ch1 <- cdm$my_cohort %>%
+    dplyr::collect() %>%
+    dplyr::arrange(dplyr::across(dplyr::all_of(cols)))
+
+  cdm_local <- dplyr::collect(cdm)
+
+  cdm_local <- generateConceptCohortSet(
+    cdm = cdm_local,
+    conceptSet = list(my_concept = 4112343L),
+    name = "my_cohort"
+  )
+
+  ch2 <- cdm_local$my_cohort %>%
+    dplyr::collect() %>%
+    dplyr::arrange(dplyr::across(dplyr::all_of(cols)))
+
+  # Remove the "GeneratedCohortSet" class from an object (if present)
+  # This was the old class that was replaced with "cohort_table"
+  # for some reason this class is present when using db cdms but not local cdms
+  dropGeneratedCohortSet <- function(x) {
+    cls <- class(x)
+    if (!is.null(cls) && "GeneratedCohortSet" %in% cls) {
+      class(x) <- cls[cls != "GeneratedCohortSet"]
+    }
+    x
+  }
+
+  ch1 <- dropGeneratedCohortSet(ch1)
+  ch2 <- dropGeneratedCohortSet(ch2)
+
+  expect_equal(ch1, ch2)
 })
 

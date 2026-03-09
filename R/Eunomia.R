@@ -1,4 +1,4 @@
-# Copyright 2024 DARWIN EU®
+# Copyright 2025 DARWIN EU®
 #
 # This file is part of CDMConnector
 #
@@ -49,6 +49,12 @@ downloadEunomiaData <- function(datasetName = "GiBleed",
 
   if (!dir.exists(pathToData)) { dir.create(pathToData, recursive = TRUE) }
 
+  if (datasetName %in% c("Synthea27NjParquet", "delphi-100k") && cdmVersion == "5.3") {
+    cli::cli_abort("{datasetName}is only available in CDM version 5.4")
+  } else if (!(datasetName %in% c("synpuf-1k", "Synthea27NjParquet", "empty_cdm", "delphi-100k")) && cdmVersion == "5.4") {
+    cli::cli_abort("{datasetName} is only available in CDM version 5.3")
+  }
+
   zipName <- glue::glue("{datasetName}_{cdmVersion}.zip")
 
   if (file.exists(file.path(pathToData, zipName)) && !overwrite) {
@@ -63,10 +69,10 @@ downloadEunomiaData <- function(datasetName = "GiBleed",
                               type = "download")
 
   # synpuf is the only dataset we have in both 5.3 and 5.4 at the moment.
-  if (datasetName != "synpuf-1k") {
-    url = glue::glue("https://example-data.ohdsi.dev/{datasetName}.zip")
+  if (datasetName == "Synthea27NjParquet") {
+    url <- "https://github.com/OHDSI/EunomiaDatasets/raw/main/datasets/Synthea27NjParquet/Synthea27NjParquet_5.4.zip"
   } else {
-    url = glue::glue("https://example-data.ohdsi.dev/synpuf-1k_{cdmVersion}.zip")
+    url <- glue::glue("https://cdmconnectordata.blob.core.windows.net/cdmconnector-example-data/{datasetName}_{cdmVersion}.zip")
   }
 
   withr::with_options(list(timeout = 5000), {
@@ -126,7 +132,10 @@ exampleDatasets <- function() {
     "synthea-veterans-10k",
     "synthea-weight_loss-10k",
     "synpuf-1k",
-    "empty_cdm")
+    "synpuf-110k",
+    "empty_cdm",
+    "Synthea27NjParquet",
+    "delphi-100k")
 }
 
 #' Create a copy of an example OMOP CDM dataset
@@ -187,7 +196,8 @@ exampleDatasets <- function() {
 #' "synthea-veterans-10k",
 #' "synthea-weight_loss-10k",
 #' "empty_cdm",
-#' "synpuf-1k"
+#' "synpuf-1k",
+#' "delphi-100k
 #'
 #' @param cdmVersion The OMOP CDM version. Must be "5.3" or "5.4".
 #' @param databaseFile The full path to the new copy of the example CDM dataset.
@@ -225,6 +235,11 @@ eunomiaDir <- function(datasetName = "GiBleed",
   rlang::check_installed("duckdb")
 
   checkmate::assertChoice(datasetName, choices = exampleDatasets())
+
+  if (datasetName == "delphi-100k") {
+    cli::cli_inform("delphi is only available in CDM version 5.4")
+    cdmVersion <- "5.4"
+  }
 
   # duckdb database are tied to a specific version of duckdb until it reaches v1.0
   duckdbVersion <- substr(utils::packageVersion("duckdb"), 1, 3)
@@ -267,7 +282,7 @@ eunomiaDir <- function(datasetName = "GiBleed",
       dplyr::mutate(cdm_datatype = dplyr::if_else(.data$cdm_datatype == "varchar(max)", "varchar(2000)", .data$cdm_datatype)) %>%
       dplyr::mutate(cdm_field_name = dplyr::if_else(.data$cdm_field_name == '"offset"', "offset", .data$cdm_field_name)) %>%
       tidyr::nest(col = -"cdm_table_name") %>%
-      dplyr::mutate(col = purrr::map(col, ~setNames(as.character(.$cdm_datatype), .$cdm_field_name)))
+      dplyr::mutate(col = purrr::map(col, ~stats::setNames(as.character(.$cdm_datatype), .$cdm_field_name)))
 
     files <- tools::file_path_sans_ext(basename(list.files(unzipLocation)))
     tables <- specs$cdm_table_name
@@ -307,7 +322,7 @@ eunomiaDir <- function(datasetName = "GiBleed",
 #' @param datasetName Name of the Eunomia dataset to check. Defaults to "GiBleed".
 #' @param cdmVersion Version of the Eunomia dataset to check. Must be "5.3" or "5.4".
 #'
-#' @return TRUE if the eunomia example dataset is available and FASLE otherwise
+#' @return TRUE if the eunomia example dataset is available and FALSE otherwise
 #' @export
 eunomiaIsAvailable <- function(datasetName = "GiBleed",
                                  cdmVersion = "5.3") {

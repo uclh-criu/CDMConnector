@@ -1,6 +1,9 @@
+url: https://darwin-eu.github.io/CDMConnector/
+
 template:
   bootstrap: 5
   bootswatch: flatly
+  logo: man/figures/logo.png
   bslib:
     primary: "#123293" # darwin dark blue
     #fg: "#5fa7d7" # darwin light blue
@@ -15,7 +18,7 @@ reference:
 - subtitle: CDM Object
   desc: Create or transform a CDM reference object. These accept and return cdm objects.
 - contents:
-  - matches("^cdm|stow|print.cdm_reference|snapshot|validateCdm|collect.cdm_reference|version|dropTable|dropStemTables|cdm_reference|insertTable|dbSource|tblGroup|copyCdmTo")
+  - matches("^cdm|stow|print.cdm_reference|snapshot|validateCdm|collect.cdm_reference|version|dropTable|dropStemTables|cdm_reference|insertTable|dbSource|tblGroup|copyCdmTo|computeDataHashByTable|cdmCommentContents")
 - subtitle: Cohort Creation and Transformation
   desc: A cohort is a set of person-days representing the time during which people in a CDM exhibited some observable characteristics. Cohorts are often the foundation of downstream analyses.
 - contents:
@@ -36,4 +39,8 @@ reference:
   desc: Run benchmarking of simple queries against your CDM reference
 - contents:
   - matches("benchmarkCDMConnector")
+- subtitle: Concept discovery
+  desc: Find concepts that co-occur with given OMOP concepts using the Columbia Open Health Data (COHD) API.
+- contents:
+  - cohdSimilarConcepts
 

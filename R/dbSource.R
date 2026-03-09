@@ -1,4 +1,4 @@
-# Copyright 2024 DARWIN EU®
+# Copyright 2025 DARWIN EU®
 #
 # This file is part of CDMConnector
 #
@@ -17,8 +17,8 @@
 #' Create a source for a cdm in a database.
 #'
 #' @param con Connection to a database.
-#' @param writeSchema Schema where cohort tables are. You must have read and
-#' write access to it.
+#' @param writeSchema Schema where cohort tables are. If provided must have read and
+#' write access to it. If NULL the cdm will be created without a write_schema.
 #'
 #' @export
 dbSource <- function(con, writeSchema) {
@@ -29,17 +29,12 @@ dbSource <- function(con, writeSchema) {
     }
     con <- pool::localCheckout(con)
   }
-  # if (methods::is(con, "DatabaseConnectorConnection")) {
-  #   cli::cli_warn(
-  #     "Not all functionality is supported when DatabaseConnector is your
-  #     database driver! Some issues may occur."
-  #   )
-  # }
+
   checkmate::assert_true(.dbIsValid(con))
   if (dbms(con) %in% c("duckdb", "sqlite") && missing(writeSchema)) {
     writeSchema <- c(schema = "main")
   }
-  checkmate::assert_character(writeSchema, min.len = 1, max.len = 3)
+  checkmate::assert_character(writeSchema, min.len = 1, max.len = 3, null.ok = TRUE)
 
   source <- structure(
     .Data = list(),
@@ -47,16 +42,24 @@ dbSource <- function(con, writeSchema) {
     "write_schema" = writeSchema
   )
   class(source) <- "db_cdm"
-  source <- omopgenerics::newCdmSource(src = source, sourceType = dbms(con))
+
+  if (is.null(writeSchema)) {
+    # create cdm source without a write schema
+    source <- structure(.Data = source, source_type = dbms(con), class = c("cdm_source", class(source)))
+  } else {
+    source <- omopgenerics::newCdmSource(src = source, sourceType = dbms(con))
+  }
   return(source)
 }
 
+#' @method insertTable db_cdm
 #' @export
 insertTable.db_cdm <- function(cdm,
                                name,
                                table,
                                overwrite = TRUE,
-                               temporary = FALSE) {
+                               temporary = FALSE,
+                               ...) {
   table <- dplyr::as_tibble(table)
   src <- cdm
   checkmate::assertCharacter(name, len = 1, any.missing = FALSE)
@@ -72,11 +75,30 @@ insertTable.db_cdm <- function(cdm,
 
   if (dbms(con) %in% c("bigquery") && nrow(table) == 0) {
     .dbCreateTable(con, fullName, table)
+  } else if (dbms(con) == "spark") {
+    # Spark/Simba ODBC often fails on parameterized INSERT (UNBOUND_SQL_PARAMETER).
+    # Create table then insert using literal VALUES.
+    # Format Date/POSIXt as ISO strings so driver doesn't produce malformed timestamps (e.g. 00-00-00).
+    table_for_insert <- .formatDatesForSparkInsert(table)
+    .dbCreateTable(con, fullName, table)
+    if (nrow(table_for_insert) > 0) {
+      qualifiedName <- .qualifiedNameForSql(con, fullName)
+      cols <- paste(DBI::dbQuoteIdentifier(con, names(table_for_insert)), collapse = ", ")
+      for (i in seq_len(nrow(table_for_insert))) {
+        row <- table_for_insert[i, , drop = FALSE]
+        vals <- vapply(seq_len(ncol(table_for_insert)), function(j) {
+          DBI::dbQuoteLiteral(con, row[[j]][[1]])
+        }, character(1))
+        sql <- paste0("INSERT INTO ", qualifiedName, " (", cols, ") VALUES (", paste(vals, collapse = ", "), ")")
+        DBI::dbExecute(con, sql)
+      }
+    }
   } else {
     DBI::dbWriteTable(conn = con, name = fullName, value = table, temporary = temporary)
   }
 
   x <- dplyr::tbl(src = con, fullName) |>
+    dplyr::rename_all(tolower) |>
     omopgenerics::newCdmTable(src = src, name = name) |>
     dplyr::select(colnames(table))
   return(x)
@@ -91,6 +113,8 @@ insertTable.db_cdm <- function(cdm,
 #'
 #' @importFrom omopgenerics dropTable
 #' @importFrom tidyselect starts_with ends_with matches
+#'
+#' @method dropTable db_cdm
 #' @export
 dropTable.db_cdm <- function(cdm, name) {
   # initial checks
@@ -123,6 +147,7 @@ dropTable.db_cdm <- function(cdm, name) {
 #' @export
 dplyr::compute
 
+#' @method compute db_cdm
 #' @export
 #' @importFrom dplyr compute
 compute.db_cdm <- function(x, name, temporary = FALSE, overwrite = TRUE, ...) {
@@ -189,8 +214,9 @@ compute.db_cdm <- function(x, name, temporary = FALSE, overwrite = TRUE, ...) {
   return(x)
 }
 
-#' @export
 #' @importFrom omopgenerics insertFromSource
+#' @method insertFromSource db_cdm
+#' @export
 insertFromSource.db_cdm <- function(cdm, value) {
   if (inherits(value, "data.frame")) {
     cli::cli_abort(
@@ -226,6 +252,7 @@ insertFromSource.db_cdm <- function(cdm, value) {
   return(value)
 }
 
+#' @method cdmTableFromSource db_cdm
 #' @export
 #' @importFrom omopgenerics cdmTableFromSource
 cdmTableFromSource.db_cdm <- function(src, value) {
@@ -263,11 +290,13 @@ cdmTableFromSource.db_cdm <- function(src, value) {
   return(value)
 }
 
+#' @method listSourceTables db_cdm
 #' @export
 listSourceTables.db_cdm <- function(cdm) {
   listTables(con = attr(cdm, "dbcon"), schema = attr(cdm, "write_schema"))
 }
 
+#' @method dropSourceTable db_cdm
 #' @export
 dropSourceTable.db_cdm <- function(cdm, name) {
   # initial checks
@@ -285,6 +314,7 @@ dropSourceTable.db_cdm <- function(cdm, name) {
   return(cdm)
 }
 
+#' @method readSourceTable db_cdm
 #' @export
 readSourceTable.db_cdm <- function(cdm, name) {
   con <- attr(cdm, "dbcon")
@@ -295,6 +325,7 @@ readSourceTable.db_cdm <- function(cdm, name) {
     omopgenerics::newCdmTable(src = cdm, name = tolower(name))
 }
 
+#' @method insertCdmTo db_cdm
 #' @export
 insertCdmTo.db_cdm <- function(cdm, to) {
   # input check
@@ -348,24 +379,71 @@ insertCdmTo.db_cdm <- function(cdm, to) {
 #' Spark/Databricks systems.
 #'
 #' @param cdm cdm reference
-#' @param dropWriteSchema Whether to drop tables in the writeSchema
-#' @param ... Not used
+#' @param dropPrefixTables Whether to drop tables in the writeSchema prefixed with `writePrefix`
+#' @param ... Not used. Included for compatibility with generic.
 #'
+#' @method cdmDisconnect db_cdm
 #' @export
-cdmDisconnect.db_cdm <- function(cdm, dropWriteSchema = FALSE, ...) {
-  omopgenerics::assertLogical(dropWriteSchema, length = 1)
-
+cdmDisconnect.db_cdm <- function(cdm, dropPrefixTables = FALSE, ...) {
+  omopgenerics::assertLogical(dropPrefixTables, length = 1)
+  # we are expecting a cdm source
+  checkmate::assert_class(cdm, "cdm_source")
+  # NOTE: what is pass in as cdm from omopgenerics is actually a cdm source
   con <- attr(cdm, "dbcon")
-  writeSchema <- attr(cdm, "write_schema")
 
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-
-  # drop tables if needed
-  if (dropWriteSchema) {
-    dropSourceTable(cdm = cdm, name = dplyr::everything())
+  if (!DBI::dbIsValid(con) && !methods::is(con, "DatabaseConnectorConnection")) {
+    rlang::inform("Database connection already closed.")
+    return(invisible(NULL))
   }
 
-  if (dbms(con) == "spark") {
+  # if the database is duckdb AND it is in the temp folder, remove the file to save temp space
+  isDuckdbInTempdir <- function(con) {
+    # DatabaseConnector and other wrappers don't have con@driver@dbdir; avoid slot access.
+    if (methods::is(con, "DatabaseConnectorConnection")) return(FALSE)
+    if (!methods::is(con, "duckdb_connection")) return(FALSE)
+    tryCatch({
+      dbdir <- con@driver@dbdir
+      if (!is.character(dbdir) || length(dbdir) != 1L || is.na(dbdir) || dbdir == "" || dbdir == ":memory:") {
+        return(FALSE)
+      }
+      db_path  <- normalizePath(dbdir, winslash = "/", mustWork = FALSE)
+      tmp_path <- normalizePath(tempdir(), winslash = "/", mustWork = FALSE)
+      # macOS often has /private prefix
+      db_path  <- sub("^/private", "", db_path)
+      tmp_path <- sub("^/private", "", tmp_path)
+      startsWith(db_path, tmp_path)
+    }, error = function(e) FALSE)
+  }
+
+  # TODO implement this cleanup for database connector duckdb connections
+  if (dbms(con) == "duckdb" && isDuckdbInTempdir(con) && !methods::is(con, "DatabaseConnectorConnection")) {
+    fileToRemove <- con@driver@dbdir
+    DBI::dbDisconnect(con, shutdown = TRUE)
+    try(unlink(fileToRemove))
+    if (file.exists(fileToRemove)) {
+      cli::cli_inform("Unable to remove temp duckdb file: {fileToRemove}")
+    }
+    return(invisible(TRUE))
+  }
+
+  if (dropPrefixTables) {
+    # remove prefix tables
+    writeSchema <- attr(cdm, "write_schema")
+    writePrefix <- writeSchema["prefix"]
+
+    if (is.na(writePrefix) || writePrefix == "") {
+      cli::cli_inform("`dropPrefixTables = TRUE` but no writePrefix was specified for the cdm")
+    } else {
+      checkmate::assertCharacter(writePrefix, len = 1, any.missing = FALSE, min.chars = 1)
+      # listTables returns only the prefixed tables since prefix is in the writeSchema
+      tablesToDrop <- listTables(con, writeSchema)
+      if (length(tablesToDrop) > 0) {
+        invisible(dropSourceTable(cdm = cdm, name = tablesToDrop))
+      }
+    }
+  }
+
+   # if (dbms(con) == "spark") {
     # TODO drop temp emulation prefix (it has to be incorporated in the dbSource object, so it is available in this function)
 
     # tbls <- listTables(con, schema = schema)
@@ -374,7 +452,31 @@ cdmDisconnect.db_cdm <- function(cdm, dropWriteSchema = FALSE, ...) {
     # purrr::walk(tempEmulationTablesToDrop,
     #             ~tryCatch(DBI::dbRemoveTable(con, .inSchema(schema, ., dbms = dbms(con))),
     #                       error = function(e) invisible(NULL)))
-  }
+   # }
 
+  if (methods::is(con, "DatabaseConnectorDbiConnection")) {
+    DatabaseConnector::disconnect(con)
+  } else if (dbms(con) == "duckdb") {
+    DBI::dbDisconnect(con, shutdown = TRUE)
+  } else {
+    DBI::dbDisconnect(con)
+  }
   return(invisible(TRUE))
+}
+
+#' @export
+summary.db_cdm <- function(object, ...) {
+  con <- attr(object, "dbcon")
+  result <- list(package = "CDMConnector")
+  schema <- attr(object, "write_schema")
+  if ("catalog" %in% names(schema)) {
+    result$write_catalog <- schema[["catalog"]]
+  }
+  if ("schema" %in% names(schema)) {
+    result$write_schema <- schema[["schema"]]
+  }
+  if ("prefix" %in% names(schema)) {
+    result$write_prefix <- schema[["prefix"]]
+  }
+  return(result)
 }

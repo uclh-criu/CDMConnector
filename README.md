@@ -1,7 +1,7 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# [CDMConnector](https://darwin-eu.github.io/CDMConnector/)
+# [CDMConnector](https://darwin-eu.github.io/CDMConnector/) <img src="man/figures/logo.png" align="right" height="180"/>
 
 <!-- badges: start -->
 
@@ -14,7 +14,7 @@ Status](https://github.com/darwin-eu/CDMConnector/workflows/R-CMD-check/badge.sv
 [![duckdb
 status](https://github.com/darwin-eu/CDMConnector/workflows/duckdb-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Aduckdb-test)
 [![Postgres
-status](https://github.com/darwin-eu/CDMConnector/workflows/postgres-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Apostgres-test)
+status](https://github.com/darwin-eu/CDMConnector/workflows/rpostgres-postgres-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Arpostgres-postgres-test)
 [![SQL Server odbc
 status](https://github.com/darwin-eu/CDMConnector/workflows/sqlserver-odbc-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Asqlserver-odbc-test)
 [![Redshift
@@ -23,7 +23,7 @@ status](https://github.com/darwin-eu/CDMConnector/workflows/redshift-test/badge.
 status](https://github.com/darwin-eu/CDMConnector/workflows/snowflake-odbc-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Asnowflake-odbc-test)
 <!-- badges: end -->
 
-> Are you using the [tidyverse](https://www.tidyverse.org/) with an OMOP
+> Are you using the [tidyverse](https://tidyverse.org/) with an OMOP
 > Common Data Model?
 >
 > Interact with your CDM in a pipe-friendly way with CDMConnector.
@@ -86,15 +86,11 @@ library(CDMConnector)
 
 con <- DBI::dbConnect(duckdb::duckdb(dbdir = eunomiaDir()))
 
-cdm <- cdm_from_con(con = con, 
-                    cdm_schema = "main", 
-                    write_schema = "main", 
-                    cdm_name = "my_duckdb_database")
+cdm <- cdmFromCon(con = con, 
+                  cdmSchema = "main", 
+                  writeSchema = "main", 
+                  cdmName = "my_duckdb_database")
 ```
-
-    ## Note: method with signature 'DBIConnection#Id' chosen for function 'dbExistsTable',
-    ##  target signature 'duckdb_connection#Id'.
-    ##  "duckdb_connection#ANY" would also be valid
 
 A `cdm_reference` is a named list of table references:
 
@@ -123,8 +119,8 @@ cdm$person %>%
   tally()
 ```
 
-    ## # Source:   SQL [1 x 1]
-    ## # Database: DuckDB v1.1.2 [root@Darwin 23.1.0:R 4.3.3//private/var/folders/2j/8z0yfn1j69q8sxjc7vj9yhz40000gp/T/RtmpDw9JTb/fileeea2255bd10b.duckdb]
+    ## # Source:   SQL [?? x 1]
+    ## # Database: DuckDB 1.4.4 [root@Darwin 25.2.0:R 4.5.1//private/var/folders/2j/8z0yfn1j69q8sxjc7vj9yhz40000gp/T/RtmpoqKZzI/fileeb501f4fa30.duckdb]
     ##       n
     ##   <dbl>
     ## 1  2694
@@ -138,7 +134,7 @@ cdm$condition_era %>%
 ```
 
     ## # Source:     SQL [?? x 2]
-    ## # Database:   DuckDB v1.1.2 [root@Darwin 23.1.0:R 4.3.3//private/var/folders/2j/8z0yfn1j69q8sxjc7vj9yhz40000gp/T/RtmpDw9JTb/fileeea2255bd10b.duckdb]
+    ## # Database:   DuckDB 1.4.4 [root@Darwin 25.2.0:R 4.5.1//private/var/folders/2j/8z0yfn1j69q8sxjc7vj9yhz40000gp/T/RtmpoqKZzI/fileeb501f4fa30.duckdb]
     ## # Ordered by: desc(n)
     ##    top_conditions                               n
     ##    <chr>                                    <dbl>
@@ -155,7 +151,7 @@ cdm$condition_era %>%
     ## # ℹ more rows
 
 And much more besides. See vignettes for further explanations on how to
-create database connections, make a cdm reference, and start analysing
+create database connections, make a cdm reference, and start analyzing
 your data.
 
 ## Getting help
@@ -168,18 +164,19 @@ If you encounter a clear bug, please file an issue with a minimal
 
     ## To cite package 'CDMConnector' in publications use:
     ## 
-    ##   Black A, Gorbachev A, Burn E, Catala Sabate M (????). _CDMConnector:
-    ##   Connect to an OMOP Common Data Model_. R package version 1.6.0,
-    ##   https://github.com/darwin-eu/CDMConnector,
-    ##   <https://darwin-eu.github.io/CDMConnector/>.
+    ##   Black A, Gorbachev A, Burn E, Catala Sabate M, Nika I (2026).
+    ##   _CDMConnector: Connect to an OMOP Common Data Model_. R package
+    ##   version 2.4.0, commit b56e5ea99a830da0054f2542dd763e45363b9104,
+    ##   <https://github.com/darwin-eu/CDMConnector>.
     ## 
     ## A BibTeX entry for LaTeX users is
     ## 
     ##   @Manual{,
     ##     title = {CDMConnector: Connect to an OMOP Common Data Model},
-    ##     author = {Adam Black and Artem Gorbachev and Edward Burn and Marti {Catala Sabate}},
-    ##     note = {R package version 1.6.0, https://github.com/darwin-eu/CDMConnector},
-    ##     url = {https://darwin-eu.github.io/CDMConnector/},
+    ##     author = {Adam Black and Artem Gorbachev and Edward Burn and Marti {Catala Sabate} and Ioanna Nika},
+    ##     year = {2026},
+    ##     note = {R package version 2.4.0, commit b56e5ea99a830da0054f2542dd763e45363b9104},
+    ##     url = {https://github.com/darwin-eu/CDMConnector},
     ##   }
 
 ------------------------------------------------------------------------

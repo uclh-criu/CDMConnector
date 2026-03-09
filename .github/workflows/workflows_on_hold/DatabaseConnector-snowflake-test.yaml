@@ -11,7 +11,7 @@ jobs:
     # if: github.repository == 'darwin-eu/CDMConnector'
     runs-on: ubuntu-latest
     container:
-      image: executionengine.azurecr.io/darwin-base:v0.3
+      image: executionengine.azurecr.io/darwin-eu-dev/examplestudy-base:latest
       env:
         SNOWFLAKE_CONNECTION_STRING: ${{ secrets.SNOWFLAKE_CONNECTION_STRING }}
         SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -49,12 +49,13 @@ jobs:
           install.packages("remotes", repos = "https://cloud.r-project.org/")
           install.packages("omopgenerics", repos = "https://cloud.r-project.org/")
           install.packages("palmerpenguins", repos = "https://cloud.r-project.org/")
-          remotes::install_github("tidyverse/dbplyr")
-          CDMConnector::download_eunomia_data()
-          print(paste("eunomia_is_available():", CDMConnector::eunomia_is_available()))
+          install.packages("dbplyr", repos = "https://cloud.r-project.org/")
+          install.packages("DatabaseConnector", repos = "https://cloud.r-project.org/")
+          CDMConnector::downloadEunomiaData()
+          print(paste("eunomiaIsAvailable():", CDMConnector::eunomiaIsAvailable()))
         shell: Rscript {0}
 
       - name: Run tests on snowflake with DatabaseConnector JDBC driver
-        run: R -e 'devtools::install(); withr::with_envvar(new = c("CI_TEST_DB" = "snowflake", "TEST_USING_DATABASE_CONNECTOR" = "TRUE"), testthat::test_local())'
+        run: R -e 'install.packages("devtools", repos = "https://cloud.r-project.org/"); devtools::install(); withr::with_envvar(new = c("CI_TEST_DB" = "snowflake", "TEST_USING_DATABASE_CONNECTOR" = "TRUE"), testthat::test_local())'
 
 

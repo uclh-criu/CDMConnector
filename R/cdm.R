@@ -1,4 +1,4 @@
-# Copyright 2024 DARWIN EU®
+# Copyright 2025 DARWIN EU®
 #
 # This file is part of CDMConnector
 #
@@ -100,7 +100,7 @@
 #' @export
 cdmFromCon <- function(con,
                        cdmSchema,
-                       writeSchema,
+                       writeSchema = NULL,
                        cohortTables = NULL,
                        cdmVersion = NULL,
                        cdmName = NULL,
@@ -124,15 +124,9 @@ cdmFromCon <- function(con,
     cli::cli_warn("Oracle database connections are not tested!")
   }
 
-  if (missing(writeSchema)) {
-    cli::cli_abort("{.arg writeSchema} is now required to create a cdm object with a database backend.
-                   Please make sure you have a schema in your database where you can create new tables and provide it in the `writeSchema` argument.
-                   If your schema has multiple parts please provide a length 2 character vector: `write_schema = c('my_db', 'my_schema')`")
-  }
-
   checkmate::assert_character(cdmName, any.missing = FALSE, len = 1, null.ok = TRUE)
   checkmate::assert_character(cdmSchema, min.len = 1, max.len = 3, any.missing = F)
-  checkmate::assert_character(writeSchema, min.len = 1, max.len = 3, any.missing = F)
+  checkmate::assert_character(writeSchema, min.len = 1, max.len = 3, any.missing = F, null.ok = TRUE)
   checkmate::assert_character(cohortTables, null.ok = TRUE)
   checkmate::assert_character(achillesSchema, min.len = 1, max.len = 3, any.missing = F, null.ok = TRUE)
   checkmate::assert_choice(cdmVersion, choices = c("5.3", "5.4", "auto"), null.ok = TRUE)
@@ -140,6 +134,11 @@ cdmFromCon <- function(con,
   if (!is.null(cdmVersion) && cdmVersion == "auto") {
     cli::cli_warn("cdmVersion = 'auto' is deprecated as of version 1.7.0. Please use cdmVersion = NULL instead.")
     cdmVersion <- NULL
+  }
+
+  # allow empty string to indicate no write prefix
+  if (identical(writePrefix, "")) {
+    writePrefix <- NULL
   }
 
   checkmate::assert_character(writePrefix, min.chars = 1, any.missing = FALSE, len = 1, null.ok = TRUE)
@@ -156,19 +155,19 @@ cdmFromCon <- function(con,
   }
 
   # make sure writeSchema is named
-  if (!rlang::is_named(writeSchema)) {
+  if (!rlang::is_named(writeSchema) && !is.null(writeSchema)) {
     if (length(writeSchema) == 1) {
       writeSchema <- c("schema" = writeSchema)
     } else if (length(writeSchema) == 2) {
       writeSchema <- c("catalog" = writeSchema[1], "schema" = writeSchema[2])
     } else {
-      rlang::abort("If `writeSchema` is unnamed then it should be length 1 `c(schema)` or 2 `c(catalog, schema)`")
+      rlang::abort("If `writeSchema` is unnamed and not NULL then it should be length 1 `c(schema)` or 2 `c(catalog, schema)`")
     }
   } else {
     checkmate::assertTRUE(all(names(writeSchema) %in% c("catalog", "schema", "prefix")))
   }
 
-  # if writePrefix argument is pass it will be override the prefix in writeSchema
+  # if writePrefix argument is passed it will be override the prefix in writeSchema
   if (!is.null(writePrefix)) {
     checkmate::assert_character(writePrefix, min.chars = 1, len = 1, pattern = "^[a-z0-9_]+$")
     writeSchema["prefix"] <- writePrefix
@@ -186,12 +185,7 @@ cdmFromCon <- function(con,
   if (length(omop_tables) == 0) {
     rlang::abort("There were no cdm tables found in the cdm_schema!")
   }
-  cdm_tables_in_db <- dbTables[which(tolower(dbTables) %in% omop_tables)]
-  if (all(cdm_tables_in_db == toupper(cdm_tables_in_db))) {
-    omop_tables <- toupper(omop_tables)
-  } else if (!all(cdm_tables_in_db == tolower(cdm_tables_in_db))) {
-    rlang::abort("CDM database tables should be either all upppercase or all lowercase!")
-  }
+  omop_tables <- validateCdmTableCase(dbTables = dbTables, omopTables = omop_tables)
 
   cdmTables <- purrr::map(
     omop_tables, ~ dplyr::tbl(src = src, schema = cdmSchema, name = .)
@@ -200,8 +194,8 @@ cdmFromCon <- function(con,
 
   if (is.null(cdmName) && ("cdm_source" %in% names(cdmTables))) {
     cdmSourceTable <- cdmTables$cdm_source %>%
-    utils::head(1) %>%
-    dplyr::collect()
+    dplyr::collect() %>%
+    utils::head(1)
 
     cdmName <- cdmSourceTable$cdm_source_abbreviation
 
@@ -221,7 +215,7 @@ cdmFromCon <- function(con,
     achilles_tables <- acTables[which(tolower(acTables) %in% achillesReqTables)]
 
     if (length(achilles_tables) != 3) {
-      cli::cli_abort("Achilles tables not found in {achilles_schema}!")
+      cli::cli_abort("Achilles tables not found in {achillesSchema}!")
     }
 
     achillesTables <- purrr::map(achilles_tables, ~dplyr::tbl(src = src, schema = achillesSchema, .)) %>%
@@ -302,8 +296,52 @@ cdmFromCon <- function(con,
   return(cdm)
 }
 
-#' @export
+validateCdmTableCase <- function(dbTables, omopTables) {
+  cdm_tables_in_db <- dbTables[which(tolower(dbTables) %in% omopTables)]
+
+  if (all(cdm_tables_in_db == toupper(cdm_tables_in_db))) {
+    return(toupper(omopTables))
+  }
+
+  if (!all(cdm_tables_in_db == tolower(cdm_tables_in_db))) {
+    uppercase_tables <- cdm_tables_in_db[cdm_tables_in_db == toupper(cdm_tables_in_db)]
+    lowercase_tables <- cdm_tables_in_db[cdm_tables_in_db == tolower(cdm_tables_in_db)]
+    mixed_tables <- cdm_tables_in_db[
+      cdm_tables_in_db != toupper(cdm_tables_in_db) &
+        cdm_tables_in_db != tolower(cdm_tables_in_db)
+    ]
+
+    uppercase_msg <- if (length(uppercase_tables) > 0) {
+      paste(uppercase_tables, collapse = ", ")
+    } else {
+      "none"
+    }
+    lowercase_msg <- if (length(lowercase_tables) > 0) {
+      paste(lowercase_tables, collapse = ", ")
+    } else {
+      "none"
+    }
+    mixed_msg <- if (length(mixed_tables) > 0) {
+      paste(mixed_tables, collapse = ", ")
+    } else {
+      "none"
+    }
+
+    rlang::abort(c(
+      "CDM database tables should be either all upppercase or all lowercase!",
+      "x" = "Mixed casing detected for CDM tables.",
+      "i" = paste0("Uppercase tables: ", uppercase_msg),
+      "i" = paste0("Lowercase tables: ", lowercase_msg),
+      "i" = paste0("Mixed-case tables: ", mixed_msg)
+    ))
+  }
+
+  return(omopTables)
+}
+
 #' @importFrom dplyr tbl
+#' @method tbl db_cdm
+#' @export
 tbl.db_cdm <- function(src, schema, name, ...) {
   con <- attr(src, "dbcon")
   fullName <- .inSchema(schema = schema, table = name, dbms = dbms(con))
@@ -401,8 +439,6 @@ verify_write_access <- function(con, write_schema, add = NULL) {
 #' The OMOP CDM tables are grouped together and the `tblGroup` function allows
 #' users to easily create a CDM reference including one or more table groups.
 #'
-#' {\figure{cdm54.png}{options: width="100\%" alt="CDM 5.4"}}
-#'
 #' The "default" table group is meant to capture the most commonly used set
 #' of CDM tables. Currently the "default" group is: person,
 #' observation_period, visit_occurrence,
@@ -468,6 +504,10 @@ dbms <- function(con) {
     con <- pool::localCheckout(con)
   }
 
+  if (is.null(con)) {
+    return("local")
+  }
+
   checkmate::assertClass(con, "DBIConnection")
 
   if (!is.null(attr(con, "dbms"))) {
@@ -526,6 +566,7 @@ result <- if (inherits(con, "Microsoft SQL Server")) {
 #' Extract the name, version, and selected record counts from a cdm.
 #'
 #' @param cdm A cdm object
+#' @param computeDataHash Compute a hash of the CDM. See ?DatabaseConnector::computeDataHash for details.
 #'
 #' @return A named list of attributes about the cdm including selected fields
 #' from the cdm_source table and record counts from the person and
@@ -541,23 +582,50 @@ result <- if (inherits(con, "Microsoft SQL Server")) {
 #'
 #' DBI::dbDisconnect(con, shutdown = TRUE)
 #' }
-snapshot <- function(cdm) {
+snapshot <- function(cdm, computeDataHash = FALSE) {
   checkmate::assertTRUE("cdm_source" %in% names(cdm))
   checkmate::assertTRUE("vocabulary" %in% names(cdm))
   checkmate::assertTRUE("person" %in% names(cdm))
   checkmate::assertTRUE("observation_period" %in% names(cdm))
+  checkmate::assertLogical(computeDataHash, len = 1, any.missing = FALSE)
 
-  person_count <- dplyr::tally(cdm$person, name = "n") %>% dplyr::pull(.data$n)
+  if (isTRUE(computeDataHash)) {
 
-  observation_period_count <- dplyr::tally(cdm$observation_period, name = "n") %>%
+    if (!isInstalled("DatabaseConnector", "7")) {
+      cli::cli_abort(c("DatabaseConnector version 7 or later is required to use computeDataHash.",
+      i = "Please install the latest version of DatabaseConnector."))
+    }
+
+    if (!methods::is(cdmSource(cdm), "db_cdm")) {
+      cli::cli_abort("Only database backed CDMs are supported by computeDataHash.")
+    }
+
+    cli::cli_inform("Computing a hash of the CDM schema")
+    dataHash <- DatabaseConnector::computeDataHash(cdmCon(cdm), paste(attr(cdm, "cdm_schema"), collapse = "."))
+  } else {
+    dataHash <- ""
+  }
+
+  person_count <- cdm$person %>%
+    dplyr::ungroup() %>%
+    dplyr::summarise(n = dplyr::n()) %>%
     dplyr::pull(.data$n)
+  stopifnot(length(person_count) == 1L)
+
+  observation_period_count <- cdm$observation_period %>%
+    dplyr::ungroup() %>%
+    dplyr::summarise(n = dplyr::n()) %>%
+    dplyr::pull(.data$n)
+  stopifnot(length(observation_period_count) == 1L)
 
   observation_period_range <- cdm$observation_period %>%
+    dplyr::ungroup() %>%
     dplyr::summarise(
       max = max(.data$observation_period_end_date, na.rm = TRUE),
       min = min(.data$observation_period_start_date, na.rm = TRUE)
     ) %>%
     dplyr::collect()
+  stopifnot(nrow(observation_period_range) == 1L)
 
   snapshot_date <- as.character(format(Sys.Date(), "%Y-%m-%d"))
 
@@ -566,11 +634,12 @@ snapshot <- function(cdm) {
     dplyr::filter(.data$vocabulary_id == "None") %>%
     dplyr::pull(.data$vocabulary_version)
 
-  if (length(vocab_version) == 0) {
+  if (length(vocab_version) == 0L) {
     vocab_version <- NA_character_
+  } else if (length(vocab_version) > 1L) {
+    rlang::warn(paste("More than one vocab_version in the vocabulary table!", paste(vocab_version, collapse = ", ")))
+    vocab_version <- vocab_version[1]
   }
-
-  cdm_source_name <- cdm$cdm_source %>% dplyr::pull(.data$cdm_source_name)
 
   cdm_source <- dplyr::collect(cdm$cdm_source)
   if (nrow(cdm_source) == 0) {
@@ -596,7 +665,8 @@ snapshot <- function(cdm) {
       earliest_observation_period_start_date =
         .env$observation_period_range$min,
       latest_observation_period_end_date = .env$observation_period_range$max,
-      snapshot_date = .env$snapshot_date
+      snapshot_date = .env$snapshot_date,
+      cdm_data_hash = .env$dataHash
     ) %>%
     dplyr::select(
       "cdm_name",
@@ -611,7 +681,8 @@ snapshot <- function(cdm) {
       "observation_period_count",
       "earliest_observation_period_start_date",
       "latest_observation_period_end_date",
-      "snapshot_date"
+      "snapshot_date",
+      "cdm_data_hash"
     ) %>%
     dplyr::mutate_all(as.character)
 }

@@ -1,14 +1,24 @@
-library(testthat)
-library(dplyr, warn.conflicts = FALSE)
+
+suppressWarnings({
+  library(dplyr, warn.conflicts = FALSE)
+  library(testthat)
+})
 
 ### CDM object DBI drivers ------
 test_cdmFromCon <- function(con, cdmSchema, writeSchema) {
-  expect_error(cdmFromCon(con, cdmSchema = cdmSchema, cdmName = "test"), "write_schema")
+  # expect_error(cdmFromCon(con, cdmSchema = cdmSchema, cdmName = "test"), "write_schema") # write schema is no longer required by CDMConnector but is required by omopgenerics.
   cdm <- cdmFromCon(con, cdmSchema = cdmSchema, cdmName = "test", writeSchema = writeSchema)
   expect_s3_class(cdm, "cdm_reference")
   expect_warning(version(cdm))
   expect_true(cdmVersion(cdm) %in% c("5.3", "5.4"))
-  expect_s3_class(snapshot(cdm), "data.frame")
+
+  cdmSnapshot <- snapshot(cdm)
+  # cdmSnapshot <- snapshot(cdm, computeDataHash = (dbms(con) == "duckdb")) # requires DatabaseConnector 7 to be released first
+  expect_s3_class(cdmSnapshot, "data.frame")
+  # if (dbms(con) == "duckdb") {
+  #   expect_true(nchar(cdmSnapshot$cdm_data_hash) > 1)
+  # }
+
   expect_true("concept" %in% names(cdm))
   expect_s3_class(dplyr::collect(head(cdm$concept)), "data.frame")
 
@@ -36,7 +46,7 @@ test_cdmFromCon <- function(con, cdmSchema, writeSchema) {
 
   expect_s3_class(df, "data.frame")
 }
-
+dbtype="snowflake"
 for (dbtype in dbToTest) {
   test_that(glue::glue("{dbtype} - cdm_from_con"), {
     if (!(dbtype %in% ciTestDbs)) skip_on_ci()
@@ -54,7 +64,7 @@ test_that("Uppercase tables are stored as lowercase in cdm", {
   skip_if_not_installed("duckdb")
   skip_if_not(eunomiaIsAvailable())
   # create a test cdm with upppercase table names
-  con <- DBI::dbConnect(duckdb::duckdb(eunomiaDir()))
+  con <- local_eunomia_con()
 
   for (name in listTables(con, "main")) {
     DBI::dbExecute(con,
@@ -69,8 +79,6 @@ test_that("Uppercase tables are stored as lowercase in cdm", {
   # check that names in cdm are lowercase
   cdm <- cdmFromCon(con = con, cdmName = "eunomia", cdmSchema = "main", writeSchema = "main")
   expect_true(all(names(cdm) == tolower(names(cdm))))
-
-  DBI::dbDisconnect(con, shutdown = TRUE)
 })
 
 # TODO add this test back when we have an example cdm with achilles tables
@@ -182,7 +190,7 @@ test_that("adding cohort tables to the cdm", {
   skip_if_not(eunomiaIsAvailable())
   skip_if_not_installed("duckdb")
 
-  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = eunomiaDir())
+  con <- local_eunomia_con()
 
   cohorts <- data.frame(
     cohortId = c(1, 2, 3),
@@ -215,18 +223,14 @@ test_that("adding cohort tables to the cdm", {
                              writeSchema = c(schema = "main"),
                              cohortTables = "test_cohort_table",
                              .softValidation = TRUE)) # passes without validation
-
-  DBI::dbDisconnect(con, shutdown = TRUE)
 })
 
 test_that("writeSchema argument specification and cdmDisconnect works", {
   skip_if_not_installed("duckdb")
-  con <- DBI::dbConnect(duckdb::duckdb(), eunomiaDir())
+  con <- local_eunomia_con()
   cdm <- cdmFromCon(con, "main", "main", writePrefix = "tmp_")
 
   expect_equal(attr(cdm, "write_schema"), c(schema = "main", prefix = "tmp_"))
-
-  cdmDisconnect(cdm)
 })
 
 test_that("schema specification with . works", {
@@ -257,3 +261,102 @@ test_that("schema specification with . works", {
   DBI::dbDisconnect(con)
 
 })
+
+
+test_that("DatabaseConnector DBI connections work with duckdb", {
+
+  skip_if_not("duckdb" %in% dbToTest)
+  testthat::skip_if_not_installed("DatabaseConnector")
+  testthat::skip_if_not_installed("duckdb")
+
+  connectionDetails <- DatabaseConnector::createConnectionDetails(
+    "duckdb",
+    server = CDMConnector::eunomiaDir()
+  )
+
+  con <- DatabaseConnector::connect(connectionDetails)
+
+  suppressMessages({
+    cdm <- CDMConnector::cdmFromCon(
+      con = con,
+      cdmSchema = "main",
+      writeSchema = "main"
+    )
+  })
+
+  df <- dplyr::collect(head(cdm$person))
+  expect_true(is.data.frame(df))
+  cdmDisconnect(cdm)
+})
+
+
+test_that("DatabaseConnector DBI connections work with RPostgres", {
+
+  skip_if_not_installed("DatabaseConnector")
+  skip_if_not_installed("RPostgres")
+  skip_if_not("postgres" %in% dbToTest)
+  skip_on_cran()
+
+  connectionDetails <- DatabaseConnector::createDbiConnectionDetails(
+    dbms = "postgresql",
+    drv = RPostgres::Postgres(),
+    dbname = Sys.getenv("CDM5_POSTGRESQL_DBNAME"),
+    host = Sys.getenv("CDM5_POSTGRESQL_HOST"),
+    user = Sys.getenv("CDM5_POSTGRESQL_USER"),
+    password = Sys.getenv("CDM5_POSTGRESQL_PASSWORD")
+  )
+
+  writeSchema <- Sys.getenv("CDM5_POSTGRESQL_SCRATCH_SCHEMA")
+  cdmSchema <- Sys.getenv("CDM5_POSTGRESQL_CDM_SCHEMA")
+
+  con <- DatabaseConnector::connect(connectionDetails)
+
+  cdm <- CDMConnector::cdmFromCon(
+    con = con,
+    cdmSchema = cdmSchema,
+    writeSchema = writeSchema
+  )
+
+  df <- dplyr::collect(head(cdm$person))
+  expect_true(is.data.frame(df))
+  cdmDisconnect(cdm)
+})
+
+
+test_that("DatabaseConnector DBI connections work with odbc SQL Server", {
+
+  skip_if_not_installed("DatabaseConnector")
+  skip_if_not_installed("odbc")
+  skip_if_not("sqlserver" %in% dbToTest)
+  skip_on_cran()
+
+  connectionDetails <- DatabaseConnector::createDbiConnectionDetails(
+    dbms = "sql server",
+    drv = odbc::odbc(),
+    Driver   = Sys.getenv("SQL_SERVER_DRIVER", "ODBC Driver 18 for SQL Server"),
+    Server   = Sys.getenv("CDM5_SQL_SERVER_SERVER"),
+    Database = Sys.getenv("CDM5_SQL_SERVER_CDM_DATABASE"),
+    UID      = Sys.getenv("CDM5_SQL_SERVER_USER"),
+    PWD      = Sys.getenv("CDM5_SQL_SERVER_PASSWORD"),
+    TrustServerCertificate = "yes",
+    Port     = as.integer(Sys.getenv("CDM5_SQL_SERVER_PORT", "1433"))
+  )
+
+  writeSchema <- strsplit(Sys.getenv("CDM5_SQL_SERVER_SCRATCH_SCHEMA"), "\\.")[[1]]
+  cdmSchema   <- strsplit(Sys.getenv("CDM5_SQL_SERVER_CDM_SCHEMA"), "\\.")[[1]]
+
+  con <- DatabaseConnector::connect(connectionDetails)
+
+  cdm <- CDMConnector::cdmFromCon(
+    con = con,
+    cdmSchema = cdmSchema,
+    writeSchema = writeSchema
+  )
+
+  df <- dplyr::collect(head(cdm$person))
+  expect_true(is.data.frame(df))
+  expect_true(nrow(df) > 0)
+  cdmDisconnect(cdm)
+})
+
+

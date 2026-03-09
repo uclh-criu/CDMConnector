@@ -1,8 +1,15 @@
 test_that("pool connections work", {
   skip_if_not_installed("duckdb")
   skip_if_not_installed("pool")
-  drv <- duckdb::duckdb(eunomiaDir())
+  skip_if_not("duckdb" %in% dbToTest)
+  dbpath <- eunomiaDir()
+  drv <- duckdb::duckdb(dbpath)
   pool <- pool::dbPool(drv)
+  withr::defer({
+    try(pool::poolClose(pool), silent = TRUE)
+    try(duckdb::duckdb_shutdown(drv), silent = TRUE)
+    unlink(dbpath)
+  })
 
   cdm <- cdmFromCon(con = pool,
                     cdmSchema = "main",
@@ -15,8 +22,5 @@ test_that("pool connections work", {
     dplyr::collect()
 
   expect_s3_class(df, "data.frame")
-
-  duckdb::duckdb_shutdown(drv)
-  pool::poolClose(pool)
 })
 

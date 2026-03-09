@@ -6,6 +6,8 @@
 \alias{CDMConnector-package}
 \title{CDMConnector: Connect to an OMOP Common Data Model}
 \description{
+\if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
+
 Provides tools for working with observational health data in the Observational Medical Outcomes Partnership (OMOP) Common Data Model format with a pipe friendly syntax. Common data model database table references are stored in a single compound object along with metadata.
 }
 \seealso{
@@ -18,13 +20,14 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Adam Black \email{black@ohdsi.org} (\href{https://orcid.org/0000-0001-5576-8701}{ORCID})
+\strong{Maintainer}: Adam Black \email{ablack3@gmail.com} (\href{https://orcid.org/0000-0001-5576-8701}{ORCID})
 
 Authors:
 \itemize{
   \item Artem Gorbachev \email{artem.gorbachev@odysseusinc.com}
   \item Edward Burn \email{edward.burn@ndorms.ox.ac.uk}
   \item Marti Catala Sabate \email{marti.catalasabate@ndorms.ox.ac.uk}
+  \item Ioanna Nika \email{i.nika@darwin-eu.org}
 }
 
 }

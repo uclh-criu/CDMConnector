@@ -4,8 +4,7 @@ output: github_document
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# [CDMConnector](https://darwin-eu.github.io/CDMConnector/)
-
+# [CDMConnector](https://darwin-eu.github.io/CDMConnector/) <img src="man/figures/logo.png" align="right" height="180"/>
  
 
 <!-- badges: start -->
@@ -14,14 +13,14 @@ output: github_document
 [![codecov.io](https://codecov.io/gh/darwin-eu/CDMConnector/coverage.svg?branch=main)](https://app.codecov.io/gh/darwin-eu/CDMConnector?branch=main)
 [![Build Status](https://github.com/darwin-eu/CDMConnector/workflows/R-CMD-check/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3AR-CMD-check)
 [![duckdb status](https://github.com/darwin-eu/CDMConnector/workflows/duckdb-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Aduckdb-test)
-[![Postgres status](https://github.com/darwin-eu/CDMConnector/workflows/postgres-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Apostgres-test)
+[![Postgres status](https://github.com/darwin-eu/CDMConnector/workflows/rpostgres-postgres-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Arpostgres-postgres-test)
 [![SQL Server odbc status](https://github.com/darwin-eu/CDMConnector/workflows/sqlserver-odbc-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Asqlserver-odbc-test)
 [![Redshift status](https://github.com/darwin-eu/CDMConnector/workflows/redshift-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Aredshift-test)
 [![Snowflake status](https://github.com/darwin-eu/CDMConnector/workflows/snowflake-odbc-test/badge.svg)](https://github.com/darwin-eu/CDMConnector/actions?query=workflow%3Asnowflake-odbc-test)
 <!-- badges: end -->
 
 
-> Are you using the [tidyverse](https://www.tidyverse.org/) with an OMOP Common Data Model? 
+> Are you using the [tidyverse](https://tidyverse.org/) with an OMOP Common Data Model? 
 >
 > Interact with your CDM in a pipe-friendly way with CDMConnector.
 >
@@ -74,9 +73,9 @@ library(CDMConnector)
 con <- DBI::dbConnect(duckdb::duckdb(dbdir = eunomiaDir()))
 
 cdm <- cdmFromCon(con = con, 
-                  cdm_schema = "main", 
-                  write_schema = "main", 
-                  cdm_name = "my_duckdb_database")
+                  cdmSchema = "main", 
+                  writeSchema = "main", 
+                  cdmName = "my_duckdb_database")
 ```
 
 A `cdm_reference` is a named list of table references:
@@ -101,7 +100,7 @@ cdm$condition_era %>%
   count(top_conditions = concept_name, sort = TRUE)
 ```
 
-And much more besides. See vignettes for further explanations on how to create database connections, make a cdm reference, and start analysing your data.
+And much more besides. See vignettes for further explanations on how to create database connections, make a cdm reference, and start analyzing your data.
 
 ```{r, include=FALSE}
 cdmDisconnect(cdm)

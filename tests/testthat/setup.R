@@ -1,10 +1,12 @@
 library(testthat)
 
-withr::local_envvar(
-  R_USER_CACHE_DIR = tempfile(),
-  .local_envir = teardown_env(),
-  EUNOMIA_DATA_FOLDER = Sys.getenv("EUNOMIA_DATA_FOLDER", unset = tempfile())
-)
+if (!interactive()) {
+  withr::local_envvar(
+    R_USER_CACHE_DIR = tempfile(),
+    .local_envir = teardown_env(),
+    EUNOMIA_DATA_FOLDER = Sys.getenv("EUNOMIA_DATA_FOLDER", unset = tempfile())
+  )
+}
 
 tryCatch({
   if (Sys.getenv("skip_eunomia_download_test") != "TRUE") downloadEunomiaData(overwrite = TRUE)
@@ -17,10 +19,20 @@ get_connection <- function(dbms, DatabaseConnector = FALSE) {
   if (DatabaseConnector) {
     stopifnot(rlang::is_installed("DatabaseConnector"))
 
-    if (dbms == "postgres") {
+    if (dbms == "duckdb") {
+      cli::cli_inform("Testing with DatabseConector on duckdb")
+      return(
+        con <- DatabaseConnector::connect(
+          dbms = "duckdb",
+          server = eunomiaDir()
+        )
+      )
+    }
+
+    if (dbms == "postgresql" || dbms == "postgres") {
       cli::cli_inform("Testing with DatabseConector on postgresql")
       return(
-        con = DatabaseConnector::connect(
+        con <- DatabaseConnector::connect(
           dbms = "postgresql",
           server = Sys.getenv("CDM5_POSTGRESQL_SERVER"),
           user = Sys.getenv("CDM5_POSTGRESQL_USER"),
@@ -40,18 +52,18 @@ get_connection <- function(dbms, DatabaseConnector = FALSE) {
       )
     }
 
-    if (dbms == "bigquery") {
-
-      options(sqlRenderTempEmulationSchema = Sys.getenv("BIGQUERY_SCRATCH_SCHEMA"))
-
-      connectionDetails <- DatabaseConnector::createConnectionDetails(dbms="bigquery",
-                                                                      connectionString=Sys.getenv("BIGQUERY_CONNECTION_STRING"),
-                                                                      user="",
-                                                                      password='')
-
-      con <- DatabaseConnector::connect(connectionDetails)
-
-      return(con)
+    # if (dbms == "sql server" || dbms == "sqlserver") {
+    if (dbms == "sqlserver") {
+      cli::cli_inform("Testing with DatabseConector on sql server")
+      return(
+        con <- DatabaseConnector::connect(
+          dbms = "sql server",
+          server = Sys.getenv("CDM5_SQL_SERVER_SERVER"),
+          user = Sys.getenv("CDM5_SQL_SERVER_USER"),
+          password = Sys.getenv("CDM5_SQL_SERVER_PASSWORD"),
+          port = Sys.getenv("CDM5_SQL_SERVER_PORT")
+        )
+      )
     }
 
     if (dbms == "snowflake") {
@@ -66,6 +78,34 @@ get_connection <- function(dbms, DatabaseConnector = FALSE) {
 
       con <- DatabaseConnector::connect(connectionDetails)
 
+      return(con)
+    }
+
+    if (dbms == "spark") {
+      cli::cli_inform("Testing with DatabseConector on spark")
+
+      connectionDetails <- DatabaseConnector::createConnectionDetails(
+        dbms = "spark",
+        user = Sys.getenv('DATABRICKS_USER'),
+        password = Sys.getenv('DATABRICKS_TOKEN'),
+        connectionString = Sys.getenv('DATABRICKS_CONNECTION_STRING')
+      )
+      con <- DatabaseConnector::connect(connectionDetails)
+
+      return(con)
+    }
+
+    if (dbms == "bigquery") {
+      cli::cli_inform("Testing with DatabseConector on bigquery")
+
+      options(sqlRenderTempEmulationSchema = Sys.getenv("BIGQUERY_SCRATCH_SCHEMA"))
+
+      connectionDetails <- DatabaseConnector::createConnectionDetails(dbms="bigquery",
+                                                                      connectionString=Sys.getenv("BIGQUERY_CONNECTION_STRING"),
+                                                                      user="",
+                                                                      password='')
+
+      con <- DatabaseConnector::connect(connectionDetails)
       return(con)
     }
 
@@ -203,25 +243,38 @@ get_write_schema <- function(dbms, prefix = paste0("temp", (floor(as.numeric(Sys
   return(s)
 }
 
+if (Sys.getenv('TEST_USING_DATABASE_CONNECTOR') %in% c("TRUE", "FALSE")) {
+  testUsingDatabaseConnector <- as.logical(Sys.getenv('TEST_USING_DATABASE_CONNECTOR'))
+} else {
+  testUsingDatabaseConnector <- F
+}
+
 disconnect <- function(con) {
   if (is.null(con)) return(invisible(NULL))
+  DBI::dbDisconnect(con)
+}
 
-  if (dbms(con) == "duckdb") {
-    DBI::dbDisconnect(con, shutdown = TRUE)
-  } else {
-    DBI::dbDisconnect(con)
-  }
+# Helper: create a duckdb connection to an eunomia copy and auto-cleanup the
+# temp file when the calling scope exits (uses withr::defer).
+local_eunomia_con <- function(..., env = parent.frame()) {
+  dbpath <- eunomiaDir(...)
+  con <- DBI::dbConnect(duckdb::duckdb(), dbpath)
+  withr::defer({
+    try(DBI::dbDisconnect(con, shutdown = TRUE), silent = TRUE)
+    unlink(dbpath)
+  }, envir = env)
+  con
 }
 
 # databases supported on github actions
-ciTestDbs <- c("duckdb", "postgres", "redshift", "sqlserver", "snowflake", "bigquery")
+ciTestDbs <- c("duckdb", "postgres", "redshift", "sqlserver", "snowflake", "bigquery", "spark")
 
 if (Sys.getenv("CI_TEST_DB") == "") {
 
   dbToTest <- c(
-    # "bigquery",
-    #
-     "duckdb"
+    # "bigquery"
+    # ,
+    "duckdb"
     # ,
     # "postgres"
     # ,
@@ -240,11 +293,7 @@ if (Sys.getenv("CI_TEST_DB") == "") {
   print(paste("running CI tests on ", dbToTest))
 }
 
-if (Sys.getenv('TEST_USING_DATABASE_CONNECTOR') %in% c("TRUE", "FALSE")) {
-  testUsingDatabaseConnector <- as.logical(Sys.getenv('TEST_USING_DATABASE_CONNECTOR'))
-} else {
-  testUsingDatabaseConnector <- F
-}
+
 
 # make sure we're only trying to test on dbs we have connection details for
 if ("postgres" %in% dbToTest & Sys.getenv("CDM5_POSTGRESQL_DBNAME") == "") {

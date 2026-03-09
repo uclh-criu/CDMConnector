@@ -1,68 +1,117 @@
+# CDMConnector 2.5.0
+
+- Add Delphi-100k example dataset
+- Improvements to `cdmFromCohortSet`/`cdmFromJson` synthetic data generation
+- Add `cohdSimilarConcepts` function to query Columbia Open Health Data API for concept co-occurrence
+- Add `generateCohortSet2` for DAG-based cohort generation without Java dependency
+- Add R-native CIRCE SQL builder (`buildCohortQuery`, `buildBatchCohortQuery`)
+- Add DAG-based query optimizer and caching
+- Add batch optimization and benchmarking vignettes
+- Fix Snowflake column quoting for domain-filtered tables
+- Fix SQL Server LIMIT syntax error in `cdmFromCon` when using DatabaseConnector
+
+# CDMConnector 2.4.0
+
+- Implement `generateCohortSet` for local cdms (e.g. with omock)
+- Allow catalogs in duckdb connections @lyoganathan
+- Add `cdmFromCohortSet` to create synthetic cdms from Atlas cohort definitions
+- Add `cdmCommentContents` for creating comments with the contents of a CDM in tests and documentation
+- Make `writeSchema` optional in `cdmFromCon` @SulevR
+
+# CDMConnector 2.3.0
+
+- Add empty CDM v5.4 example dataset @ginberg
+- Support integer64 type for personId argument in `cdmSubset` @elinrow
+- Support local CDM objects in `generateConceptCohortSet` and date functions @catalamarti
+- Fix bug with cohortCodelist creation for some cohorts @sulevR
+- Simplify `cohortCollapse` logic and support local cdm tables @ablack3
+
+# CDMConnector 2.2.0
+
+- Test using DatabaseConnector version 7 JDBC connections on all supported databases @IoannaNika
+- Change summariseQuantile2 output columns to match DrugExposureDiagnostics (e.g. q05, q10)
+- Add `computeDataHash` argument to `snapshot()`
+- Add `computeDataHashByTable` function to compute a hash for each CDM table
+- Update connection examples documentation 
+- Change Eunomia dataset download link
+- Add Synthea27NjParquet example dataset
+
+# CDMConnector 2.1.1
+
+- fix bug with cohort generation @catalamarti
+- fix bug in summariseQuantile2 @ablack3
+
+# CDMConnector 2.1.0
+
+-   Add support for Redshift and Spark with DatabaseConnector driver (pending version 7) @IoannaNika
+-   Update readme instructions to use camel case functions @ginberg
+-   New `summariseQuantile2` function that supports multiple variables @ablack3
+-   Fixed the returned table references @mvankessel-EMC
+-   Validate the writePrefix @xihang-chen
+
 # CDMConnector 2.0.0
 
-- Remove snake case functions in favor of only camel case style
-- Remove cohort table manipulation functions 
-- Add row to cohort attrition table that accounts for record collapsing cohort eras step in Atlas/Circe cohort generation
-- Increase test coverage
-- Fix bugs with `cdmFlatten` 
-- Add support for snowflake with DatabaseConnector driver
-- Add attrition record for cohort era collapse when generating Atlas cohorts
-
+-   Remove snake case functions in favor of only camel case style
+-   Remove cohort table manipulation functions
+-   Add row to cohort attrition table that accounts for record collapsing cohort eras step in Atlas/Circe cohort generation
+-   Increase test coverage
+-   Fix bugs with `cdmFlatten`
+-   Add support for snowflake with DatabaseConnector driver
+-   Add attrition record for cohort era collapse when generating Atlas cohorts
 
 # CDMConnector 1.7.0
 
-- Add support for Big Query using bigrquery DBI package (pending PRs on omopgenerics and bigrquery) @IoannaNika
-- Add support for the DatabaseConnector postgresql JDBC driver @ablack3
-- By default automatically detect CDM version  @catalamarti
-- Deprecate snake case functions @IoannaNika
-- Deprecate cohort manipulation functions @ablack3
-- Deprecate validation functions @ablack3
+-   Add support for Big Query using bigrquery DBI package (pending PRs on omopgenerics and bigrquery) @IoannaNika
+-   Add support for the DatabaseConnector postgresql JDBC driver @ablack3
+-   By default automatically detect CDM version @catalamarti
+-   Deprecate snake case functions @IoannaNika
+-   Deprecate cohort manipulation functions @ablack3
+-   Deprecate validation functions @ablack3
 
 # CDMConnector 1.6.1
 
-- use BIGINT for subject_id column of cohort tables
+-   use BIGINT for subject_id column of cohort tables
 
 # CDMConnector 1.6.0
 
-- fix bug in copyCdmTo where attribute tables were not being copied #231 @catalamarti
-- check that overwrite argument works in compute when using temp tables #222 @ablack3
-- added synpuf1k with Achilles tables to example datasets #230 @ablack3
-- add requireEunomia function #481 @catalamarti
-
+-   fix bug in copyCdmTo where attribute tables were not being copied #231 @catalamarti
+-   check that overwrite argument works in compute when using temp tables #222 @ablack3
+-   added synpuf1k with Achilles tables to example datasets #230 @ablack3
+-   add requireEunomia function #481 @catalamarti
 
 # CDMConnector 1.5.0
 
-- Get all tests passing on Databricks/Spark using odbc driver
-- Emulate temporary tables on Databricks/Spark when compute is called with temporary = TRUE
-- soft deprecate asDate in favor of as.Date
-- soft deprecate assertWriteSchema since cdm object are now required to always have a write schema
-- remove support for Capr cohort objects in generate_cohort_set to pass CRAN checks
+-   Get all tests passing on Databricks/Spark using odbc driver
+-   Emulate temporary tables on Databricks/Spark when compute is called with temporary = TRUE
+-   soft deprecate asDate in favor of as.Date
+-   soft deprecate assertWriteSchema since cdm object are now required to always have a write schema
+-   remove support for Capr cohort objects in generate_cohort_set to pass CRAN checks
 
 # CDMConnector 1.4.0
 
-- fix issue on cran server
-- new omopgenerics methods
+-   fix issue on cran server
+-   new omopgenerics methods
 
 # CDMConnector 1.3.1
 
-- Bug fix for collapse cohort
-- dbplyr 2.5.0 fixes
+-   Bug fix for collapse cohort
+-   dbplyr 2.5.0 fixes
 
 # CDMConnector 1.3.0
 
-- Incorporate omopgenerics
+-   Incorporate omopgenerics
 
 # CDMConnector 1.2.1
 
-- Fix failing CRAN tests
+-   Fix failing CRAN tests
 
 # CDMConnector 1.2.0
 
-- Compatibility with dbplyr v2.4.0
+-   Compatibility with dbplyr v2.4.0
 
 # CDMConnector 1.1.4
 
-- Fix recursive edge cases with cdm reference issue. 
+-   Fix recursive edge cases with cdm reference issue.
 
 # CDMConnector 1.1.3
 

@@ -28,7 +28,7 @@ that starts with a letter and only contains letters, numbers, and underscores.}
 exists? TRUE (default) or FALSE}
 }
 \description{
-A "chort_table" object consists of four components
+A "cohort_table" object consists of four components
 \itemize{
 \item{A remote table reference to an OHDSI cohort table with at least
 the columns: cohort_definition_id, subject_id, cohort_start_date,
@@ -44,15 +44,6 @@ can be skipped resulting in a NULL attrition attribute.}
 \item{A \strong{cohortCounts attribute} which points to a remote table
 containing cohort counts}
 }
-
-Each of the three attributes are tidy tables. The implementation of this
-object is experimental and user feedback is welcome.
-
-\ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#experimental}{\figure{lifecycle-experimental.svg}{options: alt='[Experimental]'}}}{\strong{[Experimental]}}
-One key design principle is that cohort_table objects are created once
-and can persist across analysis execution but should not be modified after
-creation. While it is possible to modify a cohort_table object doing
-so will invalidate it and it's attributes may no longer be accurate.
 }
 \examples{
 \dontrun{

@@ -747,7 +747,7 @@ cdmCon <- function(cdm) {
 #' )
 #' cdm <- CDMConnector::cdmFromDatasets(example)
 #' }
-cdmFromDatasets <- function(datasets) {
+cdmFromDatasets <- function(datasets, cdm_name, write_prefix) {
   create_duckdb_connection <- function(ds) {
     # create in-memory duckdb connection
     con <- DBI::dbConnect(duckdb::duckdb())
@@ -759,6 +759,8 @@ cdmFromDatasets <- function(datasets) {
   cdmFromCon(
     con = create_duckdb_connection(datasets),
     cdmSchema = "main",
-    writeSchema = "main"
+    writeSchema = "main",
+    writePrefix = write_prefix,
+    cdmName = cdm_name
   )
 }
